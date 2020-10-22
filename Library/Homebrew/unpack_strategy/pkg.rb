@@ -1,8 +1,10 @@
+# typed: true
 # frozen_string_literal: true
 
 require_relative "uncompressed"
 
 module UnpackStrategy
+  # Strategy for unpacking macOS package installers.
   class Pkg < Uncompressed
     using Magic
 

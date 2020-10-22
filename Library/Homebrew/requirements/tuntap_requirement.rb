@@ -1,7 +1,11 @@
+# typed: false
 # frozen_string_literal: true
 
 require "requirement"
 
+# A requirement on TunTap for macOS.
+#
+# @api private
 class TuntapRequirement < Requirement
   fatal true
   cask "tuntap"

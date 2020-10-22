@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cli/parser"
@@ -20,23 +21,22 @@ module Homebrew
              description: "Print a JSON representation of <tap>. Currently the default and only accepted "\
                           "value for <version> is `v1`. See the docs for examples of using the JSON "\
                           "output: <https://docs.brew.sh/Querying-Brew>"
-      switch :debug
     end
   end
 
   def tap_info
-    tap_info_args.parse
+    args = tap_info_args.parse
 
-    if args.installed?
-      taps = Tap
+    taps = if args.installed?
+      Tap
     else
-      taps = Homebrew.args.named.sort.map do |name|
+      args.named.sort.map do |name|
         Tap.fetch(name)
       end
     end
 
     if args.json
-      raise UsageError, "Invalid JSON version: #{args.json}" unless ["v1", true].include? args.json
+      raise UsageError, "invalid JSON version: #{args.json}" unless ["v1", true].include? args.json
 
       print_tap_json(taps.sort_by(&:to_s))
     else
@@ -70,15 +70,14 @@ module Homebrew
         puts unless i.zero?
         info = "#{tap}: "
         if tap.installed?
-          info += tap.pinned? ? "pinned" : "unpinned"
-          info += ", private" if tap.private?
-          info += if (contents = tap.contents).empty?
-            ", no commands/casks/formulae"
+          info += if (contents = tap.contents).blank?
+            "no commands/casks/formulae"
           else
-            ", #{contents.join(", ")}"
+            contents.join(", ")
           end
+          info += ", private" if tap.private?
           info += "\n#{tap.path} (#{tap.path.abv})"
-          info += "\nFrom: #{tap.remote.nil? ? "N/A" : tap.remote}"
+          info += "\nFrom: #{tap.remote.blank? ? "N/A" : tap.remote}"
         else
           info += "Not installed"
         end

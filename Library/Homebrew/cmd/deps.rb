@@ -1,10 +1,15 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
 require "ostruct"
 require "cli/parser"
+require "cask/caskroom"
+require "dependencies_helpers"
 
 module Homebrew
+  extend DependenciesHelpers
+
   module_function
 
   def deps_args
@@ -49,68 +54,74 @@ module Homebrew
              description: "Switch into the mode used by the `--all` option, but only list dependencies "\
                           "for each provided <formula>, one formula per line. This is used for "\
                           "debugging the `--installed`/`--all` display mode."
-      switch :verbose
-      switch :debug
+
       conflicts "--installed", "--all"
       formula_options
     end
   end
 
   def deps
-    deps_args.parse
+    args = deps_args.parse
 
     Formulary.enable_factory_cache!
 
     recursive = !args.send("1?")
-
-    if args.tree?
-      if args.installed?
-        puts_deps_tree Formula.installed.sort, recursive
-      else
-        raise FormulaUnspecifiedError if Homebrew.args.remaining.empty?
-
-        puts_deps_tree Homebrew.args.formulae, recursive
-      end
-      return
-    elsif args.all?
-      puts_deps Formula.sort, recursive
-      return
-    elsif !Homebrew.args.remaining.empty? && args.for_each?
-      puts_deps Homebrew.args.formulae, recursive
-      return
-    end
-
-    installed = args.installed? || ARGV.formulae.all?(&:opt_or_installed_prefix_keg)
+    installed = args.installed? || dependents(args.named.to_formulae_and_casks).all?(&:any_version_installed?)
 
     @use_runtime_dependencies = installed && recursive &&
+                                !args.tree? &&
                                 !args.include_build? &&
                                 !args.include_test? &&
                                 !args.include_optional? &&
                                 !args.skip_recommended?
 
-    if Homebrew.args.remaining.empty?
-      raise FormulaUnspecifiedError unless args.installed?
+    if args.tree?
+      dependents = if args.named.present?
+        sorted_dependents(args.named.to_formulae_and_casks)
+      elsif args.installed?
+        sorted_dependents(Formula.installed + Cask::Caskroom.casks(config: Cask::Config.from_args(args)))
+      else
+        raise FormulaUnspecifiedError
+      end
 
-      puts_deps Formula.installed.sort, recursive
+      puts_deps_tree dependents, recursive: recursive, args: args
+      return
+    elsif args.all?
+      puts_deps sorted_dependents(Formula.to_a + Cask::Cask.to_a), recursive: recursive, args: args
+      return
+    elsif !args.no_named? && args.for_each?
+      puts_deps sorted_dependents(args.named.to_formulae_and_casks), recursive: recursive, args: args
       return
     end
 
-    all_deps = deps_for_formulae(Homebrew.args.formulae, recursive, &(args.union? ? :| : :&))
-    all_deps = condense_requirements(all_deps)
-    all_deps.select!(&:installed?) if args.installed?
-    all_deps.map!(&method(:dep_display_name))
+    if args.no_named?
+      raise FormulaUnspecifiedError unless args.installed?
+
+      puts_deps sorted_dependents(Formula.installed + Cask::Caskroom.casks(config: Cask::Config.from_args(args))),
+                recursive: recursive, args: args
+      return
+    end
+
+    dependents = dependents(args.named.to_formulae_and_casks)
+
+    all_deps = deps_for_dependents(dependents, recursive: recursive, args: args, &(args.union? ? :| : :&))
+    condense_requirements(all_deps, args: args)
+    all_deps.map! { |d| dep_display_name(d, args: args) }
     all_deps.uniq!
     all_deps.sort! unless args.n?
     puts all_deps
   end
 
-  def condense_requirements(deps)
-    return deps if args.include_requirements?
-
-    deps.select { |dep| dep.is_a? Dependency }
+  def sorted_dependents(formulae_or_casks)
+    dependents(formulae_or_casks).sort_by(&:name)
   end
 
-  def dep_display_name(dep)
+  def condense_requirements(deps, args:)
+    deps.select! { |dep| dep.is_a?(Dependency) } unless args.include_requirements?
+    deps.select! { |dep| dep.is_a?(Requirement) || dep.installed? } if args.installed?
+  end
+
+  def dep_display_name(dep, args:)
     str = if dep.is_a? Requirement
       if args.include_requirements?
         ":#{dep.display_s}"
@@ -135,48 +146,49 @@ module Homebrew
     str
   end
 
-  def deps_for_formula(f, recursive = false)
-    includes, ignores = argv_includes_ignores(ARGV)
+  def deps_for_dependent(d, args:, recursive: false)
+    includes, ignores = args_includes_ignores(args)
 
-    deps = f.runtime_dependencies if @use_runtime_dependencies
+    deps = d.runtime_dependencies if @use_runtime_dependencies
 
     if recursive
-      deps ||= recursive_includes(Dependency,  f, includes, ignores)
-      reqs   = recursive_includes(Requirement, f, includes, ignores)
+      deps ||= recursive_includes(Dependency, d, includes, ignores)
+      reqs   = recursive_includes(Requirement, d, includes, ignores)
     else
-      deps ||= reject_ignores(f.deps, ignores, includes)
-      reqs   = reject_ignores(f.requirements, ignores, includes)
+      deps ||= reject_ignores(d.deps, ignores, includes)
+      reqs   = reject_ignores(d.requirements, ignores, includes)
     end
 
     deps + reqs.to_a
   end
 
-  def deps_for_formulae(formulae, recursive = false, &block)
-    formulae.map { |f| deps_for_formula(f, recursive) }.reduce(&block)
+  def deps_for_dependents(dependents, args:, recursive: false, &block)
+    dependents.map { |d| deps_for_dependent(d, recursive: recursive, args: args) }.reduce(&block)
   end
 
-  def puts_deps(formulae, recursive = false)
-    formulae.each do |f|
-      deps = deps_for_formula(f, recursive)
-      deps = condense_requirements(deps)
+  def puts_deps(dependents, args:, recursive: false)
+    dependents.each do |dependent|
+      deps = deps_for_dependent(dependent, recursive: recursive, args: args)
+      condense_requirements(deps, args: args)
       deps.sort_by!(&:name)
-      deps.map!(&method(:dep_display_name))
-      puts "#{f.full_name}: #{deps.join(" ")}"
+      deps.map! { |d| dep_display_name(d, args: args) }
+      puts "#{dependent.full_name}: #{deps.join(" ")}"
     end
   end
 
-  def puts_deps_tree(formulae, recursive = false)
-    formulae.each do |f|
-      puts f.full_name
+  def puts_deps_tree(dependents, args:, recursive: false)
+    dependents.each do |d|
+      puts d.full_name
       @dep_stack = []
-      recursive_deps_tree(f, "", recursive)
+      recursive_deps_tree(d, "", recursive, args: args)
       puts
     end
   end
 
-  def recursive_deps_tree(f, prefix, recursive)
-    includes, ignores = argv_includes_ignores(ARGV)
-    deps = reject_ignores(f.deps, ignores, includes)
+  def recursive_deps_tree(f, prefix, recursive, args:)
+    includes, ignores = args_includes_ignores(args)
+    dependables = @use_runtime_dependencies ? f.runtime_dependencies : f.deps
+    deps = reject_ignores(dependables, ignores, includes)
     reqs = reject_ignores(f.requirements, ignores, includes)
     dependables = reqs + deps
 
@@ -191,7 +203,7 @@ module Homebrew
         "├──"
       end
 
-      display_s = "#{tree_lines} #{dep_display_name(dep)}"
+      display_s = "#{tree_lines} #{dep_display_name(dep, args: args)}"
       is_circular = @dep_stack.include?(dep.name)
       display_s = "#{display_s} (CIRCULAR DEPENDENCY)" if is_circular
       puts "#{prefix}#{display_s}"
@@ -204,7 +216,9 @@ module Homebrew
         "│   "
       end
 
-      recursive_deps_tree(Formulary.factory(dep.name), prefix + prefix_addition, true) if dep.is_a? Dependency
+      if dep.is_a? Dependency
+        recursive_deps_tree(Formulary.factory(dep.name), prefix + prefix_addition, true, args: args)
+      end
     end
 
     @dep_stack.pop

@@ -1,8 +1,10 @@
+# typed: true
 # frozen_string_literal: true
 
 require_relative "tar"
 
 module UnpackStrategy
+  # Strategy for unpacking compress archives.
   class Compress < Tar
     using Magic
 

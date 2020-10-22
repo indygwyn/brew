@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -14,14 +15,11 @@ module Homebrew
         Open <formula> in the editor set by `EDITOR` or `HOMEBREW_EDITOR`, or open the
         Homebrew repository for editing if no formula is provided.
       EOS
-      switch :force
-      switch :verbose
-      switch :debug
     end
   end
 
   def edit
-    edit_args.parse
+    args = edit_args.parse
 
     unless (HOMEBREW_REPOSITORY/".git").directory?
       raise <<~EOS
@@ -31,16 +29,15 @@ module Homebrew
       EOS
     end
 
+    paths = args.named.to_formulae_paths.select do |path|
+      next path if path.exist?
+
+      raise UsageError, "#{path} doesn't exist on disk. " \
+                        "Run #{Formatter.identifier("brew create $URL")} to create a new Formula!"
+    end.presence
+
     # If no brews are listed, open the project root in an editor.
-    paths = [HOMEBREW_REPOSITORY] if ARGV.named.empty?
-
-    # Don't use ARGV.formulae as that will throw if the file doesn't parse
-    paths ||= ARGV.named.map do |name|
-      path = Formulary.path(name)
-      raise FormulaUnavailableError, name if !path.file? && !args.force?
-
-      path
-    end
+    paths ||= [HOMEBREW_REPOSITORY]
 
     exec_editor(*paths)
   end

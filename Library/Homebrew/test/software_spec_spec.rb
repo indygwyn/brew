@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "software_spec"
@@ -147,8 +148,8 @@ describe SoftwareSpec do
     end
 
     it "ignores OS version specifications", :needs_linux do
-      subject.uses_from_macos("foo")
-      subject.uses_from_macos("bar" => :build)
+      subject.uses_from_macos("foo", since: :mojave)
+      subject.uses_from_macos("bar" => :build, :since => :mojave)
 
       expect(subject.deps.first.name).to eq("foo")
       expect(subject.deps.last.name).to eq("bar")
@@ -192,9 +193,6 @@ describe BottleSpecification do
 
     checksums.each_pair do |cat, digest|
       subject.sha256(digest => cat)
-    end
-
-    checksums.each_pair do |cat, digest|
       checksum, = subject.checksum_for(cat)
       expect(Checksum.new(:sha256, digest)).to eq(checksum)
     end

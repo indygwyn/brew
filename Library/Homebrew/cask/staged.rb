@@ -1,8 +1,12 @@
+# typed: false
 # frozen_string_literal: true
 
 require "utils/user"
 
 module Cask
+  # Helper functions for staged casks.
+  #
+  # @api private
   module Staged
     def set_permissions(paths, permissions_str)
       full_paths = remove_nonexistent(paths)

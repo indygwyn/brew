@@ -37,19 +37,9 @@ For example, see the [header of `brew-services.rb`](https://github.com/Homebrew/
 
 ## Homebrew organisation external commands
 
-### homebrew-livecheck
-Check if there is a new upstream version of a formula.
-See the [`README`](https://github.com/Homebrew/homebrew-livecheck/blob/master/README.md) for more info and usage.
-
-Install using:
-
-```sh
-brew tap homebrew/livecheck
-```
-
 ### homebrew-command-not-found
 Ubuntu's `command-not-found equivalent` for Homebrew.
-See the [`README`](https://github.com/Homebrew/homebrew-command-not-found/blob/master/README.md) for more info and usage.
+See the [`README`](https://github.com/Homebrew/homebrew-command-not-found/blob/HEAD/README.md) for more info and usage.
 
 Install using:
 
@@ -59,7 +49,7 @@ brew tap homebrew/command-not-found
 
 ### homebrew-aliases
 Allows you to alias your Homebrew commands.
-See the [`README`](https://github.com/Homebrew/homebrew-aliases/blob/master/README.md) for more info and usage.
+See the [`README`](https://github.com/Homebrew/homebrew-aliases/blob/HEAD/README.md) for more info and usage.
 
 Install using:
 

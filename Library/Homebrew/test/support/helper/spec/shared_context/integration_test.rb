@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "open3"
@@ -46,7 +47,7 @@ RSpec.shared_context "integration test" do
 
     example.run
   ensure
-    FileUtils.rm_r HOMEBREW_PREFIX/"bin"
+    FileUtils.rm_rf HOMEBREW_PREFIX/"bin"
   end
 
   # Generate unique ID to be able to
@@ -66,8 +67,10 @@ RSpec.shared_context "integration test" do
     env = args.last.is_a?(Hash) ? args.pop : {}
 
     # Avoid warnings when HOMEBREW_PREFIX/bin is not in PATH.
+    # Also include our extra commands directory.
     path = [
       env["PATH"],
+      (HOMEBREW_LIBRARY_PATH/"test/support/helper/cmd").realpath.to_s,
       (HOMEBREW_PREFIX/"bin").realpath.to_s,
       ENV["PATH"],
     ].compact.join(File::PATH_SEPARATOR)
@@ -84,7 +87,7 @@ RSpec.shared_context "integration test" do
 
     @ruby_args ||= begin
       ruby_args = [
-        "-W0",
+        ENV["HOMEBREW_RUBY_WARNINGS"],
         "-I", $LOAD_PATH.join(File::PATH_SEPARATOR)
       ]
       if ENV["HOMEBREW_TESTS_COVERAGE"]
@@ -161,6 +164,12 @@ RSpec.shared_context "integration test" do
       content = <<~RUBY
         url "https://brew.sh/#{name}-1.0"
       RUBY
+
+    when "package_license"
+      content = <<~RUBY
+        url "https://brew.sh/#patchelf-1.0"
+        license "0BSD"
+      RUBY
     end
 
     Formulary.core_path(name).tap do |formula_path|
@@ -177,6 +186,7 @@ RSpec.shared_context "integration test" do
     fi = FormulaInstaller.new(Formula[name])
     fi.build_bottle = build_bottle
     fi.prelude
+    fi.fetch
     fi.install
     fi.finish
   end

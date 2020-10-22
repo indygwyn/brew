@@ -1,7 +1,8 @@
+# typed: strict
 # frozen_string_literal: true
 
 class KegOnlyReason
-  def valid?
+  def applicable?
     true
   end
 end

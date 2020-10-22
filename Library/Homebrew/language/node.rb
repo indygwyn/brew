@@ -1,6 +1,10 @@
+# typed: false
 # frozen_string_literal: true
 
 module Language
+  # Helper functions for Node formulae.
+  #
+  # @api public
   module Node
     def self.npm_cache_config
       "cache=#{HOMEBREW_CACHE}/npm_cache"
@@ -41,7 +45,7 @@ module Language
       pack = pack_for_installation
 
       # npm install args for global style module format installed into libexec
-      %W[
+      args = %W[
         -ddd
         --global
         --build-from-source
@@ -49,6 +53,10 @@ module Language
         --prefix=#{libexec}
         #{Dir.pwd}/#{pack}
       ]
+
+      args << "--unsafe-perm" if Process.uid.zero?
+
+      args
     end
 
     def self.local_npm_install_args

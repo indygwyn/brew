@@ -1,7 +1,11 @@
+# typed: false
 # frozen_string_literal: true
 
 require "requirement"
 
+# A requirement on X11.
+#
+# @api private
 class X11Requirement < Requirement
   include Comparable
 

@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module RuboCop
@@ -6,7 +7,8 @@ module RuboCop
     module Constants
       STANZA_GROUPS = [
         [:version, :sha256],
-        [:url, :appcast, :name, :homepage],
+        [:language],
+        [:url, :appcast, :name, :desc, :homepage],
         [
           :auto_updates,
           :conflicts_with,
@@ -27,10 +29,12 @@ module RuboCop
           :internet_plugin,
           :prefpane,
           :qlplugin,
+          :mdimporter,
           :screen_saver,
           :service,
           :audio_unit_plugin,
           :vst_plugin,
+          :vst3_plugin,
           :artifact,
           :stage_only,
         ],

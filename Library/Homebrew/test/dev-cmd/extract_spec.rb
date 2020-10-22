@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
@@ -27,23 +28,32 @@ describe "brew extract", :integration_test do
   end
 
   it "retrieves the most recent version of formula" do
+    path = target[:path]/"Formula/testball@0.2.rb"
     expect { brew "extract", "testball", target[:name] }
-      .to be_a_success
-    expect(target[:path]/"Formula/testball@0.2.rb").to exist
-    expect(Formulary.factory(target[:path]/"Formula/testball@0.2.rb").version).to be == "0.2"
+      .to output(/^#{path}$/).to_stdout
+      .and not_to_output.to_stderr
+      .and be_a_success
+    expect(path).to exist
+    expect(Formulary.factory(path).version).to be == "0.2"
   end
 
   it "retrieves the specified version of formula" do
+    path = target[:path]/"Formula/testball@0.1.rb"
     expect { brew "extract", "testball", target[:name], "--version=0.1" }
-      .to be_a_success
-    expect(target[:path]/"Formula/testball@0.1.rb").to exist
-    expect(Formulary.factory(target[:path]/"Formula/testball@0.1.rb").version).to be == "0.1"
+      .to output(/^#{path}$/).to_stdout
+      .and not_to_output.to_stderr
+      .and be_a_success
+    expect(path).to exist
+    expect(Formulary.factory(path).version).to be == "0.1"
   end
 
   it "retrieves the compatible version of formula" do
-    expect { brew "extract", "testball", target[:name], "--version=0", "--debug" }
-      .to be_a_success
-    expect(target[:path]/"Formula/testball@0.rb").to exist
-    expect(Formulary.factory(target[:path]/"Formula/testball@0.rb").version).to be == "0.2"
+    path = target[:path]/"Formula/testball@0.rb"
+    expect { brew "extract", "testball", target[:name], "--version=0" }
+      .to output(/^#{path}$/).to_stdout
+      .and not_to_output.to_stderr
+      .and be_a_success
+    expect(path).to exist
+    expect(Formulary.factory(path).version).to be == "0.2"
   end
 end

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "download_strategy"
@@ -121,7 +122,6 @@ describe GitDownloadStrategy do
         git_commit_all
       end
 
-      subject.shutup!
       expect(subject.fetch_last_commit).to eq("f68266e")
     end
   end
@@ -184,9 +184,12 @@ describe CurlDownloadStrategy do
       let(:specs) { { user_agent: "Mozilla/25.0.1" } }
 
       it "adds the appropriate curl args" do
-        expect(subject).to receive(:system_command!) { |*, args:, **|
-          expect(args.each_cons(2)).to include(["--user-agent", "Mozilla/25.0.1"])
-        }
+        expect(subject).to receive(:system_command).with(
+          /curl/,
+          hash_including(args: array_including_cons("--user-agent", "Mozilla/25.0.1")),
+        )
+        .at_least(:once)
+        .and_return(instance_double(SystemCommand::Result, success?: true, stdout: "", assert_success!: nil))
 
         subject.fetch
       end
@@ -198,14 +201,15 @@ describe CurlDownloadStrategy do
       let(:specs) { { user_agent: :fake } }
 
       it "adds the appropriate curl args" do
-        expect(subject).to receive(:system_command!) { |*, args:, **|
-          expect(args.each_cons(2).to_a).to include(
-            [
-              "--user-agent",
-              a_string_matching(/Mozilla.*Mac OS X 10.*AppleWebKit/),
-            ],
-          )
-        }
+        expect(subject).to receive(:system_command).with(
+          /curl/,
+          hash_including(args: array_including_cons(
+            "--user-agent",
+            a_string_matching(/Mozilla.*Mac OS X 10.*AppleWebKit/),
+          )),
+        )
+        .at_least(:once)
+        .and_return(instance_double(SystemCommand::Result, success?: true, stdout: "", assert_success!: nil))
 
         subject.fetch
       end
@@ -222,9 +226,12 @@ describe CurlDownloadStrategy do
       }
 
       it "adds the appropriate curl args and does not URL-encode the cookies" do
-        expect(subject).to receive(:system_command!) { |*, args:, **|
-          expect(args.each_cons(2)).to include(["-b", "coo=k/e;mon=ster"])
-        }
+        expect(subject).to receive(:system_command).with(
+          /curl/,
+          hash_including(args: array_including_cons("-b", "coo=k/e;mon=ster")),
+        )
+        .at_least(:once)
+        .and_return(instance_double(SystemCommand::Result, success?: true, stdout: "", assert_success!: nil))
 
         subject.fetch
       end
@@ -234,9 +241,29 @@ describe CurlDownloadStrategy do
       let(:specs) { { referer: "https://somehost/also" } }
 
       it "adds the appropriate curl args" do
-        expect(subject).to receive(:system_command!) { |*, args:, **|
-          expect(args.each_cons(2)).to include(["-e", "https://somehost/also"])
-        }
+        expect(subject).to receive(:system_command).with(
+          /curl/,
+          hash_including(args: array_including_cons("-e", "https://somehost/also")),
+        )
+        .at_least(:once)
+        .and_return(instance_double(SystemCommand::Result, success?: true, stdout: "", assert_success!: nil))
+
+        subject.fetch
+      end
+    end
+
+    context "with headers set" do
+      alias_matcher :a_string_matching, :match
+
+      let(:specs) { { headers: ["foo", "bar"] } }
+
+      it "adds the appropriate curl args" do
+        expect(subject).to receive(:system_command).with(
+          /curl/,
+          hash_including(args: array_including_cons("--header", "foo").and(array_including_cons("--header", "bar"))),
+        )
+        .at_least(:once)
+        .and_return(instance_double(SystemCommand::Result, success?: true, stdout: "", assert_success!: nil))
 
         subject.fetch
       end
@@ -313,10 +340,12 @@ describe CurlPostDownloadStrategy do
       }
 
       it "adds the appropriate curl args" do
-        expect(subject).to receive(:system_command!) { |*, args:, **|
-          expect(args.each_cons(2)).to include(["-d", "form=data"])
-          expect(args.each_cons(2)).to include(["-d", "is=good"])
-        }
+        expect(subject).to receive(:system_command).with(
+          /curl/,
+          hash_including(args: array_including_cons("-d", "form=data").and(array_including_cons("-d", "is=good"))),
+        )
+        .at_least(:once)
+        .and_return(instance_double(SystemCommand::Result, success?: true, stdout: "", assert_success!: nil))
 
         subject.fetch
       end
@@ -326,9 +355,12 @@ describe CurlPostDownloadStrategy do
       let(:specs) { { using: :post } }
 
       it "adds the appropriate curl args" do
-        expect(subject).to receive(:system_command!) { |*, args:, **|
-          expect(args.each_cons(2)).to include(["-X", "POST"])
-        }
+        expect(subject).to receive(:system_command).with(
+          /curl/,
+          hash_including(args: array_including_cons("-X", "POST")),
+        )
+        .at_least(:once)
+        .and_return(instance_double(SystemCommand::Result, success?: true, stdout: "", assert_success!: nil))
 
         subject.fetch
       end
@@ -350,8 +382,7 @@ describe SubversionDownloadStrategy do
 
       it "adds the appropriate svn args" do
         expect(subject).to receive(:system_command!)
-          .with("svn", args: array_including("--trust-server-cert",
-                                             "--non-interactive"))
+          .with("svn", hash_including(args: array_including("--trust-server-cert", "--non-interactive")))
         subject.fetch
       end
     end
@@ -360,9 +391,8 @@ describe SubversionDownloadStrategy do
       let(:specs) { { revision: "10" } }
 
       it "adds svn arguments for :revision" do
-        expect(subject).to receive(:system_command!) { |*, args:, **|
-          expect(args.each_cons(2)).to include(["-r", "10"])
-        }
+        expect(subject).to receive(:system_command!)
+          .with("svn", hash_including(args: array_including_cons("-r", "10")))
 
         subject.fetch
       end

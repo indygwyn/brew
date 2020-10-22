@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 raise "HOMEBREW_BREW_FILE was not exported! Please call bin/brew directly!" unless ENV["HOMEBREW_BREW_FILE"]
@@ -29,6 +30,9 @@ HOMEBREW_LIBRARY = Pathname.new(get_env_or_raise("HOMEBREW_LIBRARY")).freeze
 # Where shim scripts for various build and SCM tools are stored
 HOMEBREW_SHIMS_PATH = (HOMEBREW_LIBRARY/"Homebrew/shims").freeze
 
+# Where external data that has been incorporated into Homebrew is stored
+HOMEBREW_DATA_PATH = (HOMEBREW_LIBRARY/"Homebrew/data").freeze
+
 # Where we store symlinks to currently linked kegs
 HOMEBREW_LINKED_KEGS = (HOMEBREW_PREFIX/"var/homebrew/linked").freeze
 
@@ -51,8 +55,7 @@ HOMEBREW_CACHE_FORMULA = (HOMEBREW_CACHE/"Formula").freeze
 HOMEBREW_LOGS = Pathname.new(get_env_or_raise("HOMEBREW_LOGS")).expand_path.freeze
 
 # Must use `/tmp` instead of `TMPDIR` because long paths break Unix domain sockets
-HOMEBREW_TEMP = begin
-  tmp = Pathname.new(get_env_or_raise("HOMEBREW_TEMP"))
+HOMEBREW_TEMP = Pathname.new(get_env_or_raise("HOMEBREW_TEMP")).yield_self do |tmp|
   tmp.mkpath unless tmp.exist?
   tmp.realpath
 end.freeze

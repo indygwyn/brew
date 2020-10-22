@@ -1,14 +1,19 @@
+# typed: false
 # frozen_string_literal: true
 
 require "timeout"
 
 require "utils/user"
 require "cask/artifact/abstract_artifact"
+require "cask/pkg"
 require "extend/hash_validator"
 using HashValidator
 
 module Cask
   module Artifact
+    # Abstract superclass for uninstall artifacts.
+    #
+    # @api private
     class AbstractUninstall < AbstractArtifact
       ORDERED_DIRECTIVES = [
         :early_script,
@@ -34,7 +39,7 @@ module Cask
         directives.assert_valid_keys!(*ORDERED_DIRECTIVES)
 
         super(cask)
-        directives[:signal] = [*directives[:signal]].flatten.each_slice(2).to_a
+        directives[:signal] = Array(directives[:signal]).flatten.each_slice(2).to_a
         @directives = directives
 
         return unless directives.key?(:kext)
@@ -49,7 +54,7 @@ module Cask
       end
 
       def summarize
-        to_h.flat_map { |key, val| [*val].map { |v| "#{key.inspect} => #{v.inspect}" } }.join(", ")
+        to_h.flat_map { |key, val| Array(val).map { |v| "#{key.inspect} => #{v.inspect}" } }.join(", ")
       end
 
       private
@@ -81,15 +86,16 @@ module Cask
 
       # :launchctl must come before :quit/:signal for cases where app would instantly re-launch
       def uninstall_launchctl(*services, command: nil, **_)
+        booleans = [false, true]
         services.each do |service|
           ohai "Removing launchctl service #{service}"
-          [false, true].each do |with_sudo|
+          booleans.each do |with_sudo|
             plist_status = command.run(
               "/bin/launchctl",
               args: ["list", service],
               sudo: with_sudo, print_stderr: false
             ).stdout
-            if plist_status.match?(/^\{/)
+            if plist_status.start_with?("{")
               command.run!("/bin/launchctl", args: ["remove", service], sudo: with_sudo)
               sleep 1
             end
@@ -326,7 +332,14 @@ module Cask
             next
           end
 
-          yield path, Pathname.glob(resolved_path)
+          begin
+            yield path, Pathname.glob(resolved_path)
+          rescue Errno::EPERM
+            raise if File.readable?(File.expand_path("~/Library/Application Support/com.apple.TCC"))
+
+            odie "Unable to remove some files. Please enable Full Disk Access for your terminal under " \
+                 "System Preferences → Security & Privacy → Privacy → Full Disk Access."
+          end
         end
       end
 
@@ -385,20 +398,37 @@ module Cask
         [trashed, untrashable]
       end
 
-      def uninstall_rmdir(*directories, command: nil, **_)
-        return if directories.empty?
+      def all_dirs?(*directories)
+        directories.all?(&:directory?)
+      end
 
-        ohai "Removing directories if empty:"
-        each_resolved_path(:rmdir, directories) do |path, resolved_paths|
-          puts path
-          resolved_paths.select(&:directory?).each do |resolved_path|
+      def recursive_rmdir(*directories, command: nil, **_)
+        success = true
+        each_resolved_path(:rmdir, directories) do |_path, resolved_paths|
+          resolved_paths.select(&method(:all_dirs?)).each do |resolved_path|
+            puts resolved_path.sub(Dir.home, "~")
+
             if (ds_store = resolved_path.join(".DS_Store")).exist?
               command.run!("/bin/rm", args: ["-f", "--", ds_store], sudo: true, print_stderr: false)
             end
 
-            command.run("/bin/rmdir", args: ["--", resolved_path], sudo: true, print_stderr: false)
+            unless recursive_rmdir(*resolved_path.children, command: command)
+              success = false
+              next
+            end
+
+            status = command.run("/bin/rmdir", args: ["--", resolved_path], sudo: true, print_stderr: false).success?
+            success &= status
           end
         end
+        success
+      end
+
+      def uninstall_rmdir(*args)
+        return if args.empty?
+
+        ohai "Removing directories if empty:"
+        recursive_rmdir(*args)
       end
     end
   end

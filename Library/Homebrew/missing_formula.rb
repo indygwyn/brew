@@ -1,36 +1,24 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formulary"
 
 module Homebrew
+  # Helper module for checking if there is a reason a formula is missing.
+  #
+  # @api private
   module MissingFormula
     class << self
       def reason(name, silent: false, show_info: false)
-        cask_reason(name, silent: silent, show_info: show_info) || blacklisted_reason(name) ||
+        cask_reason(name, silent: silent, show_info: show_info) || disallowed_reason(name) ||
           tap_migration_reason(name) || deleted_reason(name, silent: silent)
       end
 
-      def blacklisted_reason(name)
+      def disallowed_reason(name)
         case name.downcase
         when "gem", /^rubygems?$/ then <<~EOS
           macOS provides gem as part of Ruby. To install a newer version:
             brew install ruby
-        EOS
-        when "tex", "tex-live", "texlive", "mactex", "latex" then <<~EOS
-          There are three versions of MacTeX.
-
-          Full installation:
-            brew cask install mactex
-
-          Full installation without bundled applications:
-            brew cask install mactex-no-gui
-
-          Minimal installation:
-            brew cask install basictex
-        EOS
-        when "asymptote" then <<~EOS
-          Asymptote is part of MacTeX:
-            brew cask install mactex
         EOS
         when "pip" then <<~EOS
           pip is part of the python formula:
@@ -47,14 +35,6 @@ module Homebrew
         when /(lib)?lzma/ then <<~EOS
           lzma is now part of the xz formula:
             brew install xz
-        EOS
-        when "gtest", "googletest", "google-test" then <<~EOS
-          Installing gtest system-wide is not recommended; it should be vendored
-          in your projects that use it.
-        EOS
-        when "gmock", "googlemock", "google-mock" then <<~EOS
-          Installing gmock system-wide is not recommended; it should be vendored
-          in your projects that use it.
         EOS
         when "sshpass" then <<~EOS
           We won't add sshpass because it makes it too easy for novice SSH users to
@@ -101,13 +81,17 @@ module Homebrew
           cargo is part of the rust formula:
             brew install rust
         EOS
+        when "cargo-completion" then <<~EOS
+          cargo-completion is part of the rust formula:
+            brew install rust
+        EOS
         when "uconv" then <<~EOS
           uconv is part of the icu4c formula:
             brew install icu4c
         EOS
         end
       end
-      alias generic_blacklisted_reason blacklisted_reason
+      alias generic_disallowed_reason disallowed_reason
 
       def tap_migration_reason(name)
         message = nil

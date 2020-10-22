@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "utils/user"
@@ -8,6 +9,9 @@ require "stringio"
 BUG_REPORTS_URL = "https://github.com/Homebrew/homebrew-cask#reporting-bugs"
 
 module Cask
+  # Helper functions for various cask operations.
+  #
+  # @api private
   module Utils
     def self.gain_permissions_remove(path, command: SystemCommand)
       if path.respond_to?(:rmtree) && path.exist?
@@ -80,12 +84,11 @@ module Cask
     end
 
     def self.method_missing_message(method, token, section = nil)
-      poo = []
-      poo << "Unexpected method '#{method}' called"
-      poo << "during #{section}" if section
-      poo << "on Cask #{token}."
+      message = +"Unexpected method '#{method}' called "
+      message << "during #{section} " if section
+      message << "on Cask #{token}."
 
-      opoo(poo.join(" ") + "\n" + error_message_with_suggestions)
+      opoo "#{message}\n#{error_message_with_suggestions}"
     end
   end
 end

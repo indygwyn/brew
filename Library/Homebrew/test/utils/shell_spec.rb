@@ -1,22 +1,23 @@
+# typed: false
 # frozen_string_literal: true
 
 require "utils/shell"
 
 describe Utils::Shell do
   describe "::profile" do
-    it "returns ~/.bash_profile by default" do
+    it "returns ~/.profile by default" do
       ENV["SHELL"] = "/bin/another_shell"
-      expect(subject.profile).to eq("~/.bash_profile")
+      expect(subject.profile).to eq("~/.profile")
     end
 
-    it "returns ~/.bash_profile for sh" do
+    it "returns ~/.profile for sh" do
       ENV["SHELL"] = "/bin/sh"
-      expect(subject.profile).to eq("~/.bash_profile")
+      expect(subject.profile).to eq("~/.profile")
     end
 
-    it "returns ~/.bash_profile for Bash" do
+    it "returns ~/.profile for Bash" do
       ENV["SHELL"] = "/bin/bash"
-      expect(subject.profile).to eq("~/.bash_profile")
+      expect(subject.profile).to eq("~/.profile")
     end
 
     it "returns /tmp/.zshrc for Zsh if ZDOTDIR is /tmp" do

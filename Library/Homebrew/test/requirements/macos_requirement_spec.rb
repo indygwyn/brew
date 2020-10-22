@@ -1,5 +1,7 @@
+# typed: false
 # frozen_string_literal: true
 
+require "cli/args"
 require "requirements/macos_requirement"
 
 describe MacOSRequirement do
@@ -16,8 +18,8 @@ describe MacOSRequirement do
     end
 
     it "supports maximum versions", :needs_macos do
-      requirement = described_class.new([:mavericks], comparator: "<=")
-      expect(requirement.satisfied?).to eq MacOS.version <= :mavericks
+      requirement = described_class.new([:catalina], comparator: "<=")
+      expect(requirement.satisfied?).to eq MacOS.version <= :catalina
     end
   end
 end

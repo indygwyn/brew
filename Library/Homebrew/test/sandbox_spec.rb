@@ -1,8 +1,9 @@
+# typed: false
 # frozen_string_literal: true
 
 require "sandbox"
 
-describe Sandbox do
+describe Sandbox, :needs_macos do
   define_negated_matcher :not_matching, :matching
 
   let(:dir) { mktmpdir }
@@ -10,16 +11,6 @@ describe Sandbox do
 
   before do
     skip "Sandbox not implemented." unless described_class.available?
-  end
-
-  specify "#formula?" do
-    f = formula { url "foo-1.0" }
-    expect(described_class).to be_formula(f), "Formulae should be sandboxed."
-  end
-
-  specify "#test?" do
-    ENV.delete("HOMEBREW_NO_SANDBOX")
-    expect(described_class).to be_test, "Tests should be sandboxed unless --no-sandbox was passed."
   end
 
   specify "#allow_write" do

@@ -1,7 +1,11 @@
+# typed: false
 # frozen_string_literal: true
 
 module Cask
   module Artifact
+    # Abstract superclass for all artifacts.
+    #
+    # @api private
     class AbstractArtifact
       include Comparable
       extend Predicable
@@ -42,7 +46,7 @@ module Cask
 
       def <=>(other)
         return unless other.class < AbstractArtifact
-        return 0 if self.class == other.class
+        return 0 if instance_of?(other.class)
 
         @@sort_order ||= [ # rubocop:disable Style/ClassVars
           PreflightBlock,
@@ -62,6 +66,7 @@ module Cask
             Colorpicker,
             Prefpane,
             Qlplugin,
+            Mdimporter,
             Dictionary,
             Font,
             Service,
@@ -76,7 +81,7 @@ module Cask
           Manpage,
           PostflightBlock,
           Zap,
-        ].each_with_index.flat_map { |classes, i| [*classes].map { |c| [c, i] } }.to_h
+        ].each_with_index.flat_map { |classes, i| Array(classes).map { |c| [c, i] } }.to_h
 
         (@@sort_order[self.class] <=> @@sort_order[other.class]).to_i
       end

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "extend/ENV"
@@ -25,20 +26,21 @@ module Homebrew
              description: "Test the head version of a formula."
       switch "--keep-tmp",
              description: "Retain the temporary files created for the test."
-      switch :verbose
-      switch :debug
+      switch "--retry",
+             description: "Retry if a testing fails."
+
       conflicts "--devel", "--HEAD"
+      min_named :formula
     end
   end
 
   def test
-    test_args.parse
-
-    raise FormulaUnspecifiedError if ARGV.named.empty?
+    args = test_args.parse
 
     require "formula_assertions"
+    require "formula_free_port"
 
-    Homebrew.args.resolved_formulae.each do |f|
+    args.named.to_resolved_formulae.each do |f|
       # Cannot test uninstalled formulae
       unless f.latest_version_installed?
         ofail "Testing requires the latest version of #{f.full_name}"
@@ -52,7 +54,7 @@ module Homebrew
       end
 
       # Don't test unlinked formulae
-      if !Homebrew.args.force? && !f.keg_only? && !f.linked?
+      if !args.force? && !f.keg_only? && !f.linked?
         ofail "#{f.full_name} is not linked"
         next
       end
@@ -70,28 +72,24 @@ module Homebrew
         next
       end
 
-      puts "Testing #{f.full_name}"
+      oh1 "Testing #{f.full_name}"
 
       env = ENV.to_hash
 
       begin
-        args = %W[
+        exec_args = %W[
           #{RUBY_PATH}
-          -W0
+          #{ENV["HOMEBREW_RUBY_WARNINGS"]}
           -I #{$LOAD_PATH.join(File::PATH_SEPARATOR)}
           --
           #{HOMEBREW_LIBRARY_PATH}/test.rb
           #{f.path}
-        ].concat(Homebrew.args.options_only)
+        ].concat(args.options_only)
 
-        if f.head?
-          args << "--HEAD"
-        elsif f.devel?
-          args << "--devel"
-        end
+        exec_args << "--HEAD" if f.head?
 
         Utils.safe_fork do
-          if Sandbox.test?
+          if Sandbox.available?
             sandbox = Sandbox.new
             f.logs.mkpath
             sandbox.record_log(f.logs/"test.sandbox.log")
@@ -102,17 +100,30 @@ module Homebrew
             sandbox.allow_write_path(HOMEBREW_PREFIX/"var/homebrew/locks")
             sandbox.allow_write_path(HOMEBREW_PREFIX/"var/log")
             sandbox.allow_write_path(HOMEBREW_PREFIX/"var/run")
-            sandbox.exec(*args)
+            sandbox.exec(*exec_args)
           else
-            exec(*args)
+            exec(*exec_args)
           end
         end
       rescue Exception => e # rubocop:disable Lint/RescueException
+        retry if retry_test?(f, args: args)
         ofail "#{f.full_name}: failed"
         puts e, e.backtrace
       ensure
         ENV.replace(env)
       end
+    end
+  end
+
+  def retry_test?(f, args:)
+    @test_failed ||= Set.new
+    if args.retry? && @test_failed.add?(f)
+      oh1 "Testing #{f.full_name} (again)"
+      f.clear_cache
+      true
+    else
+      Homebrew.failed = true
+      false
     end
   end
 end

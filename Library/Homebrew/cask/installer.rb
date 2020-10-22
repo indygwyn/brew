@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula_installer"
@@ -13,6 +14,9 @@ require "cask/quarantine"
 require "cgi"
 
 module Cask
+  # Installer for a {Cask}.
+  #
+  # @api private
   class Installer
     extend Predicable
     # TODO: it is unwise for Cask::Staged to be a module, when we are
@@ -59,10 +63,10 @@ module Cask
       odebug "Cask::Installer#fetch"
 
       verify_has_sha if require_sha? && !force?
+      satisfy_dependencies
+
       download
       verify
-
-      satisfy_dependencies
     end
 
     def stage
@@ -96,7 +100,7 @@ module Cask
       opoo "macOS's Gatekeeper has been disabled for this Cask" unless quarantine?
       stage
 
-      @cask.config = Config.global.merge(old_config)
+      @cask.config = @cask.default_config.merge(old_config)
 
       install_artifacts
 
@@ -140,7 +144,7 @@ module Cask
 
     def summary
       s = +""
-      s << "#{Emoji.install_badge}  " if Emoji.enabled?
+      s << "#{Homebrew::EnvConfig.install_badge}  " unless Homebrew::EnvConfig.no_emoji?
       s << "#{@cask} was successfully #{upgrade? ? "upgraded" : "installed"}!"
       s.freeze
     end
@@ -211,9 +215,7 @@ module Cask
 
         odebug "Installing artifact of class #{artifact.class}"
 
-        if artifact.is_a?(Artifact::Binary)
-          next unless binaries?
-        end
+        next if artifact.is_a?(Artifact::Binary) && !binaries?
 
         artifact.install_phase(command: @command, verbose: verbose?, force: force?)
         already_installed_artifacts.unshift(artifact)
@@ -223,13 +225,11 @@ module Cask
     rescue => e
       begin
         already_installed_artifacts.each do |artifact|
-          next unless artifact.respond_to?(:uninstall_phase)
+          if artifact.respond_to?(:uninstall_phase)
+            odebug "Reverting installation of artifact of class #{artifact.class}"
+            artifact.uninstall_phase(command: @command, verbose: verbose?, force: force?)
+          end
 
-          odebug "Reverting installation of artifact of class #{artifact.class}"
-          artifact.uninstall_phase(command: @command, verbose: verbose?, force: force?)
-        end
-
-        already_installed_artifacts.each do |artifact|
           next unless artifact.respond_to?(:post_uninstall_phase)
 
           odebug "Reverting installation of artifact of class #{artifact.class}"
@@ -277,7 +277,7 @@ module Cask
 
     def x11_dependencies
       return unless @cask.depends_on.x11
-      raise CaskX11DependencyError, @cask.token unless MacOS::X11.installed?
+      raise CaskX11DependencyError, @cask.token unless MacOS::XQuartz.installed?
     end
 
     def graph_dependencies(cask_or_formula, acc = TopologicalHash.new)
@@ -285,10 +285,11 @@ module Cask
 
       if cask_or_formula.is_a?(Cask)
         formula_deps = cask_or_formula.depends_on.formula.map { |f| Formula[f] }
-        cask_deps = cask_or_formula.depends_on.cask.map(&CaskLoader.public_method(:load))
+        cask_deps = cask_or_formula.depends_on.cask.map { |c| CaskLoader.load(c, config: nil) }
       else
         formula_deps = cask_or_formula.deps.reject(&:build?).map(&:to_formula)
-        cask_deps = cask_or_formula.requirements.map(&:cask).compact.map(&CaskLoader.public_method(:load))
+        cask_deps = cask_or_formula.requirements.map(&:cask).compact
+                                   .map { |c| CaskLoader.load(c, config: nil) }
       end
 
       acc[cask_or_formula] ||= []
@@ -328,8 +329,12 @@ module Cask
 
     def missing_cask_and_formula_dependencies
       collect_cask_and_formula_dependencies.reject do |cask_or_formula|
-        (cask_or_formula.respond_to?(:installed?) && cask_or_formula.installed?) ||
-          (cask_or_formula.respond_to?(:any_version_installed?) && cask_or_formula.any_version_installed?)
+        installed = if cask_or_formula.respond_to?(:any_version_installed?)
+          cask_or_formula.any_version_installed?
+        else
+          cask_or_formula.try(:installed?)
+        end
+        installed && (cask_or_formula.respond_to?(:optlinked?) ? cask_or_formula.optlinked? : true)
       end
     end
 
@@ -363,12 +368,12 @@ module Cask
             force:                   false,
           ).install
         else
-          FormulaInstaller.new(cask_or_formula).yield_self do |fi|
+          FormulaInstaller.new(cask_or_formula, verbose: verbose?).yield_self do |fi|
             fi.installed_as_dependency = true
             fi.installed_on_request = false
             fi.show_header = true
-            fi.verbose = verbose?
             fi.prelude
+            fi.fetch
             fi.install
             fi.finish
           end
@@ -448,13 +453,13 @@ module Cask
       odebug "#{artifacts.length} artifact/s defined", artifacts
 
       artifacts.each do |artifact|
-        next unless artifact.respond_to?(:uninstall_phase)
+        if artifact.respond_to?(:uninstall_phase)
+          odebug "Uninstalling artifact of class #{artifact.class}"
+          artifact.uninstall_phase(
+            command: @command, verbose: verbose?, skip: clear, force: force?, upgrade: upgrade?,
+          )
+        end
 
-        odebug "Uninstalling artifact of class #{artifact.class}"
-        artifact.uninstall_phase(command: @command, verbose: verbose?, skip: clear, force: force?, upgrade: upgrade?)
-      end
-
-      artifacts.each do |artifact|
         next unless artifact.respond_to?(:post_uninstall_phase)
 
         odebug "Post-uninstalling artifact of class #{artifact.class}"

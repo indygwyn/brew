@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -20,20 +21,18 @@ module Homebrew
       comma_array "--hide",
                   description: "Act as if none of the specified <hidden> are installed. <hidden> should be "\
                                "a comma-separated list of formulae."
-      switch :verbose
-      switch :debug
     end
   end
 
   def missing
-    missing_args.parse
+    args = missing_args.parse
 
     return unless HOMEBREW_CELLAR.exist?
 
-    ff = if Homebrew.args.named.blank?
+    ff = if args.no_named?
       Formula.installed.sort
     else
-      Homebrew.args.resolved_formulae.sort
+      args.named.to_resolved_formulae.sort
     end
 
     ff.each do |f|

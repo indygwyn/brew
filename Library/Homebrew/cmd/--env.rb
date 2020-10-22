@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "extend/ENV"
@@ -27,17 +28,15 @@ module Homebrew
   end
 
   def __env
-    __env_args.parse
+    args = __env_args.parse
 
-    ENV.activate_extensions!
-    ENV.deps = Homebrew.args.formulae if superenv?
+    ENV.activate_extensions!(env: args.env)
+    ENV.deps = args.named.to_formulae if superenv?(args.env)
     ENV.setup_build_environment
-    ENV.universal_binary if ARGV.build_universal?
 
     shell = if args.plain?
       nil
     elsif args.shell.nil?
-      # legacy behavior
       :bash unless $stdout.tty?
     elsif args.shell == "auto"
       Utils::Shell.parent || Utils::Shell.preferred
@@ -45,9 +44,9 @@ module Homebrew
       Utils::Shell.from_path(args.shell)
     end
 
-    env_keys = build_env_keys(ENV)
+    env_keys = BuildEnvironment.keys(ENV)
     if shell.nil?
-      dump_build_env ENV
+      BuildEnvironment.dump ENV
     else
       env_keys.each do |key|
         puts Utils::Shell.export_value(key, ENV[key], shell)

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 describe "globally-scoped helper methods" do
@@ -253,7 +254,7 @@ describe "globally-scoped helper methods" do
         )
       }.to raise_error(
         MethodDeprecatedError,
-        %r{method.*replacement.*homebrew/core.*\/Taps\/homebrew\/homebrew-core\/}m,
+        %r{method.*replacement.*homebrew/core.*/Taps/homebrew/homebrew-core/}m,
       )
     end
   end

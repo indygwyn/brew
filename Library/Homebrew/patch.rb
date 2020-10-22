@@ -1,8 +1,12 @@
+# typed: false
 # frozen_string_literal: true
 
 require "resource"
 require "erb"
 
+# Helper module for creating patches.
+#
+# @api private
 module Patch
   def self.create(strip, src, &block)
     case strip
@@ -38,11 +42,11 @@ module Patch
       {}
     end.each_pair do |strip, urls|
       Array(urls).each do |url|
-        case url
+        patch = case url
         when :DATA
-          patch = DATAPatch.new(strip)
+          DATAPatch.new(strip)
         else
-          patch = LegacyPatch.new(strip, url)
+          LegacyPatch.new(strip, url)
         end
         patches << patch
       end
@@ -52,6 +56,9 @@ module Patch
   end
 end
 
+# An abstract class representing a patch embedded into a formula.
+#
+# @api private
 class EmbeddedPatch
   attr_writer :owner
   attr_reader :strip
@@ -77,6 +84,9 @@ class EmbeddedPatch
   end
 end
 
+# A patch at the `__END__` of a formula file.
+#
+# @api private
 class DATAPatch < EmbeddedPatch
   attr_accessor :path
 
@@ -100,6 +110,9 @@ class DATAPatch < EmbeddedPatch
   end
 end
 
+# A string containing a patch.
+#
+# @api private
 class StringPatch < EmbeddedPatch
   def initialize(strip, str)
     super(strip)
@@ -111,14 +124,17 @@ class StringPatch < EmbeddedPatch
   end
 end
 
+# A string containing a patch.
+#
+# @api private
 class ExternalPatch
   extend Forwardable
 
   attr_reader :resource, :strip
 
   def_delegators :resource,
-                 :url, :fetch, :patch_files, :verify_download_integrity, :cached_download,
-                 :clear_cache
+                 :url, :fetch, :patch_files, :verify_download_integrity,
+                 :cached_download, :downloaded?, :clear_cache
 
   def initialize(strip, &block)
     @strip    = strip
@@ -135,7 +151,7 @@ class ExternalPatch
   end
 
   def apply
-    dir = Pathname.pwd
+    base_dir = Pathname.pwd
     resource.unpack do
       patch_dir = Pathname.pwd
       if patch_files.empty?
@@ -149,6 +165,8 @@ class ExternalPatch
 
         patch_files << children.first.basename
       end
+      dir = base_dir
+      dir /= resource.directory if resource.directory.present?
       dir.cd do
         patch_files.each do |patch_file|
           ohai "Applying #{patch_file}"
@@ -157,6 +175,10 @@ class ExternalPatch
         end
       end
     end
+  rescue ErrorDuringExecution => e
+    f = resource.owner.owner
+    cmd, *args = e.cmd
+    raise BuildError.new(f, cmd, args, ENV.to_hash)
   end
 
   def inspect
@@ -164,26 +186,14 @@ class ExternalPatch
   end
 end
 
+# A legacy patch.
+#
 # Legacy patches have no checksum and are not cached.
+#
+# @api private
 class LegacyPatch < ExternalPatch
-  def initialize(strip, url)
+  def initialize(strip, _url)
+    odisabled "legacy patches", "'patch do' blocks"
     super(strip)
-    resource.url(url)
-    resource.download_strategy = CurlDownloadStrategy
-  end
-
-  def fetch
-    clear_cache
-    super
-  end
-
-  def verify_download_integrity(_fn)
-    # no-op
-  end
-
-  def apply
-    super
-  ensure
-    clear_cache
   end
 end

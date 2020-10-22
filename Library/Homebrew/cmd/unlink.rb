@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "ostruct"
@@ -18,30 +19,27 @@ module Homebrew
       switch "-n", "--dry-run",
              description: "List files which would be unlinked without actually unlinking or "\
                           "deleting any files."
-      switch :verbose
-      switch :debug
+
+      min_named :keg
     end
   end
 
   def unlink
-    unlink_args.parse
+    args = unlink_args.parse
 
-    raise KegUnspecifiedError if args.remaining.empty?
+    options = { dry_run: args.dry_run?, verbose: args.verbose? }
 
-    mode = OpenStruct.new
-    mode.dry_run = true if args.dry_run?
-
-    Homebrew.args.kegs.each do |keg|
-      if mode.dry_run
+    args.named.to_kegs.each do |keg|
+      if args.dry_run?
         puts "Would remove:"
-        keg.unlink(mode)
+        keg.unlink(**options)
         next
       end
 
       keg.lock do
         print "Unlinking #{keg}... "
         puts if args.verbose?
-        puts "#{keg.unlink(mode)} symlinks removed"
+        puts "#{keg.unlink(**options)} symlinks removed"
       end
     end
   end

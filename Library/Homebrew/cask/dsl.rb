@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "locale"
@@ -21,8 +22,12 @@ require "cask/dsl/uninstall_preflight"
 require "cask/dsl/version"
 
 require "cask/url"
+require "cask/utils"
 
 module Cask
+  # Class representing the domain-specific language used for casks.
+  #
+  # @api private
   class DSL
     ORDINARY_ARTIFACT_CLASSES = [
       Artifact::Installer,
@@ -39,6 +44,7 @@ module Cask
       Artifact::Pkg,
       Artifact::Prefpane,
       Artifact::Qlplugin,
+      Artifact::Mdimporter,
       Artifact::ScreenSaver,
       Artifact::Service,
       Artifact::StageOnly,
@@ -63,6 +69,7 @@ module Cask
                             :caveats,
                             :conflicts_with,
                             :container,
+                            :desc,
                             :depends_on,
                             :homepage,
                             :language,
@@ -90,6 +97,10 @@ module Cask
       return @name if args.empty?
 
       @name.concat(args.flatten)
+    end
+
+    def desc(description = nil)
+      set_unique_stanza(:desc, description.nil?) { description }
     end
 
     def set_unique_stanza(stanza, should_return)
@@ -130,19 +141,19 @@ module Cask
     end
 
     def language_eval
-      return @language if instance_variable_defined?(:@language)
+      return @language if defined?(@language)
 
       return @language = nil if @language_blocks.nil? || @language_blocks.empty?
 
       raise CaskInvalidError.new(cask, "No default language specified.") if @language_blocks.default.nil?
 
-      locales = MacOS.languages
-                     .map do |language|
-                       Locale.parse(language)
-                     rescue Locale::ParserError
-                       nil
-                     end
-                     .compact
+      locales = cask.config.languages
+                    .map do |language|
+                      Locale.parse(language)
+                    rescue Locale::ParserError
+                      nil
+                    end
+                    .compact
 
       locales.each do |locale|
         key = locale.detect(@language_blocks.keys)
@@ -224,7 +235,7 @@ module Cask
     end
 
     def caskroom_path
-      @cask.caskroom_path
+      cask.caskroom_path
     end
 
     def staged_path
@@ -275,6 +286,8 @@ module Cask
       end
     end
 
+    # No need to define it as its the default/superclass implementation.
+    # rubocop:disable Style/MissingRespondToMissing
     def method_missing(method, *)
       if method
         Utils.method_missing_message(method, token)
@@ -283,10 +296,7 @@ module Cask
         super
       end
     end
-
-    def respond_to_missing?(*)
-      true
-    end
+    # rubocop:enable Style/MissingRespondToMissing
 
     def appdir
       cask.config.appdir

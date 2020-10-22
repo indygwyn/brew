@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "dependency"
@@ -54,13 +55,13 @@ class DependencyCollector
   end
 
   def git_dep_if_needed(tags)
-    return if Utils.git_available?
+    return if Utils::Git.available?
 
     Dependency.new("git", tags)
   end
 
   def subversion_dep_if_needed(tags)
-    return if Utils.svn_available?
+    return if Utils::Svn.available?
 
     Dependency.new("subversion", tags)
   end
@@ -142,7 +143,7 @@ class DependencyCollector
   end
 
   def resource_dep(spec, tags)
-    tags << :build
+    tags << :build << :test
     strategy = spec.download_strategy
 
     if strategy <= CurlDownloadStrategy

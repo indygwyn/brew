@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 describe SystemCommand do
@@ -37,7 +38,7 @@ describe SystemCommand do
       it "unsets them" do
         expect {
           command.run!
-        }.to raise_error(/C: parameter null or not set/)
+        }.to raise_error(/C: parameter (null or )?not set/)
       end
     end
 

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
@@ -7,6 +8,15 @@ describe "Homebrew.cleanup_args" do
 end
 
 describe "brew cleanup", :integration_test do
+  before do
+    FileUtils.mkdir_p HOMEBREW_LIBRARY/"Homebrew/vendor/"
+    FileUtils.touch HOMEBREW_LIBRARY/"Homebrew/vendor/portable-ruby-version"
+  end
+
+  after do
+    FileUtils.rm_rf HOMEBREW_LIBRARY/"Homebrew"
+  end
+
   describe "--prune=all" do
     it "removes all files in Homebrew's cache" do
       (HOMEBREW_CACHE/"test").write "test"

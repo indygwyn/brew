@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "version"
@@ -15,6 +16,34 @@ describe Version::Token do
 
   specify "#to_s" do
     expect(described_class.new("foo").to_s).to eq("foo")
+  end
+
+  it "can be compared against nil" do
+    expect(described_class.create("2")).to be > nil
+    expect(described_class.create("p194")).to be > nil
+  end
+
+  it "can be compared against Version::NULL_TOKEN" do
+    expect(described_class.create("2")).to be > Version::NULL_TOKEN
+    expect(described_class.create("p194")).to be > Version::NULL_TOKEN
+  end
+
+  it "can be compared against strings" do
+    expect(described_class.create("2")).to be == "2"
+    expect(described_class.create("p194")).to be == "p194"
+    expect(described_class.create("1")).to be == 1
+  end
+
+  specify "comparison returns nil for non-token" do
+    v = described_class.create("1")
+    expect(v <=> Object.new).to be nil
+    expect { v > Object.new }.to raise_error(ArgumentError)
+  end
+
+  describe "#to_str" do
+    it "implicitly converts token to string" do
+      expect(String.try_convert(described_class.new("foo"))).not_to be nil
+    end
   end
 end
 
@@ -41,17 +70,19 @@ describe Version::NULL do
   end
 end
 
-describe Version::NullToken do
-  specify "#inspect" do
-    expect(subject.inspect).to eq("#<Version::NullToken>")
-  end
-
-  it "is equal to itself" do
-    expect(subject).to be == described_class.new
-  end
-end
-
 describe Version do
+  describe "::NULL_TOKEN" do
+    subject { described_class::NULL_TOKEN }
+
+    specify "#inspect" do
+      expect(subject.inspect).to eq("#<Version::NullToken>")
+    end
+
+    it "is equal to itself" do
+      expect(subject).to be == described_class::NULL_TOKEN
+    end
+  end
+
   specify "comparison" do
     expect(described_class.create("0.1")).to be == described_class.create("0.1.0")
     expect(described_class.create("0.1")).to be < described_class.create("0.2")
@@ -140,6 +171,16 @@ describe Version do
     expect(described_class.create("1.2.3-p34")).to be > described_class.create("1.2.3")
   end
 
+  specify "comparing post-level versions" do
+    expect(described_class.create("1.2.3.post34")).to be > described_class.create("1.2.3.post33")
+    expect(described_class.create("1.2.3.post34")).to be < described_class.create("1.2.3.post35")
+
+    expect(described_class.create("1.2.3.post34")).to be > described_class.create("1.2.3rc35")
+    expect(described_class.create("1.2.3.post34")).to be > described_class.create("1.2.3alpha35")
+    expect(described_class.create("1.2.3.post34")).to be > described_class.create("1.2.3beta35")
+    expect(described_class.create("1.2.3.post34")).to be > described_class.create("1.2.3")
+  end
+
   specify "comparing unevenly-padded versions" do
     expect(described_class.create("2.1.0-p194")).to be < described_class.create("2.1-p195")
     expect(described_class.create("2.1-p195")).to be > described_class.create("2.1.0-p194")
@@ -161,6 +202,15 @@ describe Version do
     expect(described_class.create("1")).to be == 1
   end
 
+  it "can be compared against tokens" do
+    expect(described_class.create("2.1.0-p194")).to be > Version::Token.create("2")
+    expect(described_class.create("1")).to be == Version::Token.create("1")
+  end
+
+  it "can be compared against Version::NULL_TOKEN" do
+    expect(described_class.create("2.1.0-p194")).to be > Version::NULL_TOKEN
+  end
+
   specify "comparison returns nil for non-version" do
     v = described_class.create("1.0")
     expect(v <=> Object.new).to be nil
@@ -171,6 +221,16 @@ describe Version do
     versions = %w[R16B R15B03-1 R15B03 R15B02 R15B01 R14B04 R14B03
                   R14B02 R14B01 R14B R13B04 R13B03 R13B02-1].reverse
     expect(versions.sort_by { |v| described_class.create(v) }).to eq(versions)
+  end
+
+  describe "#empty?" do
+    it "returns true if version is empty" do
+      expect(described_class.create("").empty?).to eq(true)
+    end
+
+    it "returns false if version is not empty" do
+      expect(described_class.create("1.2.3").empty?).to eq(false)
+    end
   end
 
   specify "hash equality" do
@@ -218,9 +278,17 @@ describe Version do
     end
   end
 
-  specify "#detected_from_url?" do
-    expect(described_class.create("1.0")).not_to be_detected_from_url
-    expect(Version::FromURL.new("1.0")).to be_detected_from_url
+  describe "#detected_from_url?" do
+    it "is false if created explicitly" do
+      expect(described_class.new("1.0.0")).not_to be_detected_from_url
+    end
+
+    it "is true if the version was detected from a URL" do
+      version = described_class.detect("https://example.org/archive-1.0.0.tar.gz")
+
+      expect(version).to eq "1.0.0"
+      expect(version).to be_detected_from_url
+    end
   end
 
   specify "#head?" do
@@ -244,6 +312,76 @@ describe Version do
     expect(v2.to_str).to eq("HEAD-ffffff")
   end
 
+  describe "#major" do
+    it "returns major version token" do
+      expect(described_class.create("1").major).to be == Version::Token.create("1")
+      expect(described_class.create("1.2").major).to be == Version::Token.create("1")
+      expect(described_class.create("1.2.3").major).to be == Version::Token.create("1")
+      expect(described_class.create("1.2.3alpha").major).to be == Version::Token.create("1")
+      expect(described_class.create("1.2.3alpha4").major).to be == Version::Token.create("1")
+      expect(described_class.create("1.2.3beta4").major).to be == Version::Token.create("1")
+      expect(described_class.create("1.2.3pre4").major).to be == Version::Token.create("1")
+      expect(described_class.create("1.2.3rc4").major).to be == Version::Token.create("1")
+      expect(described_class.create("1.2.3-p4").major).to be == Version::Token.create("1")
+    end
+  end
+
+  describe "#minor" do
+    it "returns minor version token" do
+      expect(described_class.create("1").minor).to be nil
+      expect(described_class.create("1.2").minor).to be == Version::Token.create("2")
+      expect(described_class.create("1.2.3").minor).to be == Version::Token.create("2")
+      expect(described_class.create("1.2.3alpha").minor).to be == Version::Token.create("2")
+      expect(described_class.create("1.2.3alpha4").minor).to be == Version::Token.create("2")
+      expect(described_class.create("1.2.3beta4").minor).to be == Version::Token.create("2")
+      expect(described_class.create("1.2.3pre4").minor).to be == Version::Token.create("2")
+      expect(described_class.create("1.2.3rc4").minor).to be == Version::Token.create("2")
+      expect(described_class.create("1.2.3-p4").minor).to be == Version::Token.create("2")
+    end
+  end
+
+  describe "#patch" do
+    it "returns patch version token" do
+      expect(described_class.create("1").patch).to be nil
+      expect(described_class.create("1.2").patch).to be nil
+      expect(described_class.create("1.2.3").patch).to be == Version::Token.create("3")
+      expect(described_class.create("1.2.3alpha").patch).to be == Version::Token.create("3")
+      expect(described_class.create("1.2.3alpha4").patch).to be == Version::Token.create("3")
+      expect(described_class.create("1.2.3beta4").patch).to be == Version::Token.create("3")
+      expect(described_class.create("1.2.3pre4").patch).to be == Version::Token.create("3")
+      expect(described_class.create("1.2.3rc4").patch).to be == Version::Token.create("3")
+      expect(described_class.create("1.2.3-p4").patch).to be == Version::Token.create("3")
+    end
+  end
+
+  describe "#major_minor" do
+    it "returns major.minor version" do
+      expect(described_class.create("1").major_minor).to be == described_class.create("1")
+      expect(described_class.create("1.2").major_minor).to be == described_class.create("1.2")
+      expect(described_class.create("1.2.3").major_minor).to be == described_class.create("1.2")
+      expect(described_class.create("1.2.3alpha").major_minor).to be == described_class.create("1.2")
+      expect(described_class.create("1.2.3alpha4").major_minor).to be == described_class.create("1.2")
+      expect(described_class.create("1.2.3beta4").major_minor).to be == described_class.create("1.2")
+      expect(described_class.create("1.2.3pre4").major_minor).to be == described_class.create("1.2")
+      expect(described_class.create("1.2.3rc4").major_minor).to be == described_class.create("1.2")
+      expect(described_class.create("1.2.3-p4").major_minor).to be == described_class.create("1.2")
+    end
+  end
+
+  describe "#major_minor_patch" do
+    it "returns major.minor.patch version" do
+      expect(described_class.create("1").major_minor_patch).to be == described_class.create("1")
+      expect(described_class.create("1.2").major_minor_patch).to be == described_class.create("1.2")
+      expect(described_class.create("1.2.3").major_minor_patch).to be == described_class.create("1.2.3")
+      expect(described_class.create("1.2.3alpha").major_minor_patch).to be == described_class.create("1.2.3")
+      expect(described_class.create("1.2.3alpha4").major_minor_patch).to be == described_class.create("1.2.3")
+      expect(described_class.create("1.2.3beta4").major_minor_patch).to be == described_class.create("1.2.3")
+      expect(described_class.create("1.2.3pre4").major_minor_patch).to be == described_class.create("1.2.3")
+      expect(described_class.create("1.2.3rc4").major_minor_patch).to be == described_class.create("1.2.3")
+      expect(described_class.create("1.2.3-p4").major_minor_patch).to be == described_class.create("1.2.3")
+    end
+  end
+
   describe "::parse" do
     it "returns a NULL version when the URL cannot be parsed" do
       expect(described_class.parse("https://brew.sh/blah.tar")).to be_null
@@ -252,9 +390,9 @@ describe Version do
   end
 
   describe "::detect" do
-    matcher :be_detected_from do |url, specs = {}|
+    matcher :be_detected_from do |url, **specs|
       match do |expected|
-        @detected = described_class.detect(url, specs)
+        @detected = described_class.detect(url, **specs)
         @detected == expected
       end
 
@@ -639,6 +777,27 @@ describe Version do
         .to be_detected_from("https://ftpmirror.gnu.org/libidn/libidn-1.29-win64.zip")
     end
 
+    specify "breseq version style" do
+      expect(described_class.create("0.35.1"))
+        .to be_detected_from(
+          "https://github.com/barricklab/breseq" \
+          "/releases/download/v0.35.1/breseq-0.35.1.Source.tar.gz",
+        )
+    end
+
+    specify "wildfly version style" do
+      expect(described_class.create("20.0.1"))
+        .to be_detected_from("https://download.jboss.org/wildfly/20.0.1.Final/wildfly-20.0.1.Final.tar.gz")
+    end
+
+    specify "trinity version style" do
+      expect(described_class.create("2.10.0"))
+        .to be_detected_from(
+          "https://github.com/trinityrnaseq/trinityrnaseq" \
+          "/releases/download/v2.10.0/trinityrnaseq-v2.10.0.FULL.tar.gz",
+        )
+    end
+
     specify "with arch" do
       expect(described_class.create("4.0.18-1"))
         .to be_detected_from("https://ftpmirror.gnu.org/mtools/mtools-4.0.18-1.i686.rpm")
@@ -684,9 +843,14 @@ describe Version do
         .to be_detected_from("https://php.net/get/php-7.1.10.tar.gz/from/this/mirror")
     end
 
-    specify "from URL" do
+    specify "from tag" do
       expect(described_class.create("1.2.3"))
-        .to be_detected_from("https://github.com/foo/bar.git", tag: "v1.2.3")
+        .to be_detected_from("https://github.com/foo/bar.git", tag: "v1.2.3-stable")
+    end
+
+    specify "beta from tag" do
+      expect(described_class.create("1.2.3-beta1"))
+        .to be_detected_from("https://github.com/foo/bar.git", tag: "v1.2.3-beta1")
     end
   end
 end

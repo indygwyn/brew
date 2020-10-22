@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "fileutils"
@@ -6,6 +7,9 @@ require "cask/quarantine"
 require "cask/verify"
 
 module Cask
+  # A download corresponding to a {Cask}.
+  #
+  # @api private
   class Download
     attr_reader :cask
 

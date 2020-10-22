@@ -1,5 +1,7 @@
+# typed: false
 # frozen_string_literal: true
 
+require "cli/args"
 require "requirements/x11_requirement"
 
 describe X11Requirement do

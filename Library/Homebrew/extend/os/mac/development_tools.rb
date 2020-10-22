@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "os/mac/xcode"
@@ -55,6 +56,14 @@ class DevelopmentTools
         Install GNU's GCC:
           brew install gcc
       EOS
+    end
+
+    def build_system_info
+      build_info = {
+        "xcode" => MacOS::Xcode.version.to_s.presence,
+        "clt"   => MacOS::CLT.version.to_s.presence,
+      }
+      generic_build_system_info.merge build_info
     end
   end
 end

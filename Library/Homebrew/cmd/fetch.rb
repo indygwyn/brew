@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -5,6 +6,8 @@ require "fetch"
 require "cli/parser"
 
 module Homebrew
+  extend Fetch
+
   module_function
 
   def fetch_args
@@ -19,9 +22,9 @@ module Homebrew
              description: "Fetch HEAD version instead of stable version."
       switch "--devel",
              description: "Fetch development version instead of stable version."
-      switch :force,
+      switch "-f", "--force",
              description: "Remove a previously cached version and re-fetch."
-      switch :verbose,
+      switch "-v", "--verbose",
              description: "Do a verbose VCS checkout, if the URL represents a VCS. This is useful for "\
                           "seeing if an existing VCS cache has been updated."
       switch "--retry",
@@ -36,26 +39,25 @@ module Homebrew
       switch "--force-bottle",
              description: "Download a bottle if it exists for the current or newest version of macOS, "\
                           "even if it would not be used during installation."
-      switch :debug
+
       conflicts "--devel", "--HEAD"
       conflicts "--build-from-source", "--build-bottle", "--force-bottle"
+      min_named :formula
     end
   end
 
   def fetch
-    fetch_args.parse
-
-    raise FormulaUnspecifiedError if ARGV.named.empty?
+    args = fetch_args.parse
 
     if args.deps?
       bucket = []
-      Homebrew.args.formulae.each do |f|
+      args.named.to_formulae.each do |f|
         bucket << f
         bucket.concat f.recursive_dependencies.map(&:to_formula)
       end
       bucket.uniq!
     else
-      bucket = Homebrew.args.formulae
+      bucket = args.named.to_formulae
     end
 
     puts "Fetching: #{bucket * ", "}" if bucket.size > 1
@@ -63,13 +65,13 @@ module Homebrew
       f.print_tap_action verb: "Fetching"
 
       fetched_bottle = false
-      if Fetch.fetch_bottle?(f)
+      if fetch_bottle?(f, args: args)
         begin
-          fetch_formula(f.bottle)
+          fetch_formula(f.bottle, args: args)
         rescue Interrupt
           raise
         rescue => e
-          raise if ARGV.homebrew_developer?
+          raise if Homebrew::EnvConfig.developer?
 
           fetched_bottle = false
           onoe e.message
@@ -81,40 +83,40 @@ module Homebrew
 
       next if fetched_bottle
 
-      fetch_formula(f)
+      fetch_formula(f, args: args)
 
       f.resources.each do |r|
-        fetch_resource(r)
-        r.patches.each { |p| fetch_patch(p) if p.external? }
+        fetch_resource(r, args: args)
+        r.patches.each { |p| fetch_patch(p, args: args) if p.external? }
       end
 
-      f.patchlist.each { |p| fetch_patch(p) if p.external? }
+      f.patchlist.each { |p| fetch_patch(p, args: args) if p.external? }
     end
   end
 
-  def fetch_resource(r)
+  def fetch_resource(r, args:)
     puts "Resource: #{r.name}"
-    fetch_fetchable r
+    fetch_fetchable r, args: args
   rescue ChecksumMismatchError => e
-    retry if retry_fetch? r
+    retry if retry_fetch?(r, args: args)
     opoo "Resource #{r.name} reports different #{e.hash_type}: #{e.expected}"
   end
 
-  def fetch_formula(f)
-    fetch_fetchable f
+  def fetch_formula(f, args:)
+    fetch_fetchable f, args: args
   rescue ChecksumMismatchError => e
-    retry if retry_fetch? f
+    retry if retry_fetch?(f, args: args)
     opoo "Formula reports different #{e.hash_type}: #{e.expected}"
   end
 
-  def fetch_patch(p)
-    fetch_fetchable p
+  def fetch_patch(p, args:)
+    fetch_fetchable p, args: args
   rescue ChecksumMismatchError => e
     Homebrew.failed = true
     opoo "Patch reports different #{e.hash_type}: #{e.expected}"
   end
 
-  def retry_fetch?(f)
+  def retry_fetch?(f, args:)
     @fetch_failed ||= Set.new
     if args.retry? && @fetch_failed.add?(f)
       ohai "Retrying download"
@@ -126,7 +128,7 @@ module Homebrew
     end
   end
 
-  def fetch_fetchable(f)
+  def fetch_fetchable(f, args:)
     f.clear_cache if args.force?
 
     already_fetched = f.cached_download.exist?
@@ -134,7 +136,7 @@ module Homebrew
     begin
       download = f.fetch(verify_download_integrity: false)
     rescue DownloadError
-      retry if retry_fetch? f
+      retry if retry_fetch?(f, args: args)
       raise
     end
 

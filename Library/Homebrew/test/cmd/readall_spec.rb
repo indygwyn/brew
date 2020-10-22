@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
@@ -15,7 +16,7 @@ describe "brew readall", :integration_test do
 
     FileUtils.ln_s formula_file, alias_file
 
-    expect { brew "readall", "--aliases", "--syntax" }
+    expect { brew "readall", "--aliases", "--syntax", CoreTap.instance.name }
       .to be_a_success
       .and not_to_output.to_stdout
       .and not_to_output.to_stderr

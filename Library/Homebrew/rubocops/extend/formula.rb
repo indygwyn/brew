@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 # Silence compatibility warning.
@@ -10,13 +11,19 @@ ensure
 end
 
 require "extend/string"
+require "rubocops/shared/helper_functions"
 
 module RuboCop
   module Cop
+    # Superclass for all formula cops.
+    #
+    # @api private
     class FormulaCop < Cop
       include RangeHelp
+      include HelperFunctions
 
       attr_accessor :file_path
+
       @registry = Cop.registry
 
       # This method is called by RuboCop and is the main entry point
@@ -29,28 +36,6 @@ module RuboCop
         class_node, parent_class_node, @body = *node
         @formula_name = Pathname.new(@file_path).basename(".rb").to_s
         audit_formula(node, class_node, parent_class_node, @body)
-      end
-
-      # Checks for regex match of pattern in the node and
-      # sets the appropriate instance variables to report the match
-      def regex_match_group(node, pattern)
-        string_repr = string_content(node)
-        match_object = string_repr.match(pattern)
-        return unless match_object
-
-        node_begin_pos = start_column(node)
-        line_begin_pos = line_start_column(node)
-        if node_begin_pos == line_begin_pos
-          @column = node_begin_pos + match_object.begin(0) - line_begin_pos
-        else
-          @column = node_begin_pos + match_object.begin(0) - line_begin_pos + 1
-        end
-        @length = match_object.to_s.length
-        @line_no = line_number(node)
-        @source_buf = source_buffer(node)
-        @offense_source_range = source_range(@source_buf, @line_no, @column, @length)
-        @offensive_node = node
-        match_object
       end
 
       # Yields to block when there is a match.
@@ -200,10 +185,10 @@ module RuboCop
       # Returns true if given dependency name and dependency type exist in given dependency method call node.
       # TODO: Add case where key of hash is an array
       def depends_on_name_type?(node, name = nil, type = :required)
-        if name
-          name_match = false
+        name_match = if name
+          false
         else
-          name_match = true # Match only by type when name is nil
+          true # Match only by type when name is nil
         end
 
         case type
@@ -411,7 +396,7 @@ module RuboCop
         @offense_source_range = method_node.source_range
         params.all? do |given_param|
           method_params.any? do |method_param|
-            if given_param.class == Regexp
+            if given_param.instance_of?(Regexp)
               regex_match_group(method_param, given_param)
             else
               node_equals?(method_param, given_param)
@@ -441,24 +426,9 @@ module RuboCop
         end
       end
 
-      # Returns the begin position of the node's line in source code
-      def line_start_column(node)
-        node.source_range.source_buffer.line_range(node.loc.line).begin_pos
-      end
-
-      # Returns the begin position of the node in source code
-      def start_column(node)
-        node.source_range.begin_pos
-      end
-
       # Returns the ending position of the node in source code
       def end_column(node)
         node.source_range.end_pos
-      end
-
-      # Returns the line number of the node
-      def line_number(node)
-        node.loc.line
       end
 
       # Returns the class node's name, nil if not a class node
@@ -483,27 +453,6 @@ module RuboCop
         block.loc.end.line - block.loc.begin.line
       end
 
-      # Source buffer is required as an argument to report style violations
-      def source_buffer(node)
-        node.source_range.source_buffer
-      end
-
-      # Returns the string representation if node is of type str(plain) or dstr(interpolated) or const
-      def string_content(node)
-        case node.type
-        when :str
-          node.str_content
-        when :dstr
-          node.each_child_node(:str).map(&:str_content).join
-        when :const
-          node.const_name
-        when :sym
-          node.children.first.to_s
-        else
-          ""
-        end
-      end
-
       # Returns true if the formula is versioned
       def versioned_formula?
         @formula_name.include?("@")
@@ -521,10 +470,6 @@ module RuboCop
         return unless match_obj = @file_path.match(%r{/(homebrew-\w+)/})
 
         match_obj[1]
-      end
-
-      def problem(msg)
-        add_offense(@offensive_node, location: @offense_source_range, message: msg)
       end
 
       private

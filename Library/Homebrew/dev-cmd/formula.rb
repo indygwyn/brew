@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -13,16 +14,14 @@ module Homebrew
 
         Display the path where <formula> is located.
       EOS
-      switch :verbose
-      switch :debug
+
+      min_named :formula
     end
   end
 
   def formula
-    formula_args.parse
+    args = formula_args.parse
 
-    raise FormulaUnspecifiedError if Homebrew.args.named.blank?
-
-    Homebrew.args.resolved_formulae.each { |f| puts f.path }
+    args.named.to_formulae_paths.each(&method(:puts))
   end
 end

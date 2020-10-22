@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cli/parser"
@@ -13,20 +14,20 @@ module Homebrew
         Display Homebrew's install path. *Default:* `/usr/local` on macOS and
         `/home/linuxbrew/.linuxbrew` on Linux.
 
-        If <formula> is provided, display the location in the cellar where <formula>
+        If <formula> is provided, display the location in the Cellar where <formula>
         is or would be installed.
       EOS
     end
   end
 
   def __prefix
-    __prefix_args.parse
+    args = __prefix_args.parse
 
-    if Homebrew.args.named.blank?
+    if args.no_named?
       puts HOMEBREW_PREFIX
     else
-      puts Homebrew.args.resolved_formulae.map { |f|
-        f.opt_prefix.exist? ? f.opt_prefix : f.installed_prefix
+      puts args.named.to_resolved_formulae.map { |f|
+        f.opt_prefix.exist? ? f.opt_prefix : f.latest_installed_prefix
       }
     end
   end

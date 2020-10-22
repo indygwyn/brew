@@ -1,17 +1,24 @@
+# typed: false
 # frozen_string_literal: true
 
 require "erb"
 
 module Utils
+  # Helper module for fetching and reporting analytics data.
+  #
+  # @api private
   module Analytics
     class << self
+      include Context
+
       def report(type, metadata = {})
+        return if not_this_run?
         return if disabled?
 
         args = []
 
         # do not load .curlrc unless requested (must be the first argument)
-        args << "-q" unless ENV["HOMEBREW_CURLRC"]
+        args << "--disable" unless Homebrew::EnvConfig.curlrc?
 
         args += %W[
           --max-time 3
@@ -66,7 +73,7 @@ module Utils
         return if exception.formula.tap.private?
 
         action = exception.formula.full_name
-        if (options = exception.options&.to_a&.join(" "))
+        if (options = exception.options.to_a.map(&:to_s).join(" ").presence)
           action = "#{action} #{options}".strip
         end
         report_event("BuildError", action)
@@ -77,9 +84,13 @@ module Utils
       end
 
       def disabled?
-        return true if ENV["HOMEBREW_NO_ANALYTICS"] || ENV["HOMEBREW_NO_ANALYTICS_THIS_RUN"]
+        return true if Homebrew::EnvConfig.no_analytics?
 
         config_true?(:analyticsdisabled)
+      end
+
+      def not_this_run?
+        ENV["HOMEBREW_NO_ANALYTICS_THIS_RUN"].present?
       end
 
       def no_message_output?
@@ -111,10 +122,10 @@ module Utils
         config_delete(:analyticsuuid)
       end
 
-      def output(filter: nil)
-        days = Homebrew.args.days || "30"
-        category = Homebrew.args.category || "install"
-        json = formulae_api_json("analytics/#{category}/#{days}d.json")
+      def output(args:, filter: nil)
+        days = args.days || "30"
+        category = args.category || "install"
+        json = formulae_brew_sh_json("analytics/#{category}/#{days}d.json")
         return if json.blank? || json["items"].blank?
 
         os_version = category == "os-version"
@@ -128,9 +139,8 @@ module Utils
           else
             item["formula"]
           end
-          if filter.present?
-            next if key != filter && !key.start_with?("#{filter} ")
-          end
+          next if filter.present? && key != filter && !key.start_with?("#{filter} ")
+
           results[key] = item["count"].tr(",", "").to_i
         end
 
@@ -142,11 +152,8 @@ module Utils
         table_output(category, days, results, os_version: os_version, cask_install: cask_install)
       end
 
-      def formula_output(f)
-        json = formulae_api_json("#{formula_path}/#{f}.json")
-        return if json.blank? || json["analytics"].blank?
-
-        full_analytics = Homebrew.args.analytics? || Homebrew.args.verbose?
+      def get_analytics(json, args:)
+        full_analytics = args.analytics? || verbose?
 
         ohai "Analytics"
         json["analytics"].each do |category, value|
@@ -156,12 +163,8 @@ module Utils
           value.each do |days, results|
             days = days.to_i
             if full_analytics
-              if Homebrew.args.days.present?
-                next if Homebrew.args.days&.to_i != days
-              end
-              if Homebrew.args.category.present?
-                next if Homebrew.args.category != category
-              end
+              next if args.days.present? && args.days&.to_i != days
+              next if args.category.present? && args.category != category
 
               table_output(category, days, results)
             else
@@ -172,6 +175,20 @@ module Utils
 
           puts "#{category}: #{analytics.join(", ")}" unless full_analytics
         end
+      end
+
+      def formula_output(f, args:)
+        json = formulae_brew_sh_json("#{formula_path}/#{f}.json")
+        return if json.blank? || json["analytics"].blank?
+
+        get_analytics(json, args: args)
+      end
+
+      def cask_output(cask, args:)
+        json = formulae_brew_sh_json("#{cask_path}/#{cask}.json")
+        return if json.blank? || json["analytics"].blank?
+
+        get_analytics(json, args: args)
       end
 
       def custom_prefix_label
@@ -302,8 +319,8 @@ module Utils
         end
       end
 
-      def formulae_api_json(endpoint)
-        return if ENV["HOMEBREW_NO_ANALYTICS"] || ENV["HOMEBREW_NO_GITHUB_API"]
+      def formulae_brew_sh_json(endpoint)
+        return if Homebrew::EnvConfig.no_analytics? || Homebrew::EnvConfig.no_github_api?
 
         output, = curl_output("--max-time", "5",
                               "https://formulae.brew.sh/api/#{endpoint}")
@@ -331,6 +348,10 @@ module Utils
         "analytics"
       end
       alias generic_analytics_path analytics_path
+
+      def cask_path
+        "cask"
+      end
     end
   end
 end

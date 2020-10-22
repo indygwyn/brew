@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cache_store"
@@ -24,19 +25,17 @@ module Homebrew
       switch "--cached",
              description: "Print the cached linkage values stored in `HOMEBREW_CACHE`, set by a previous "\
                           "`brew linkage` run."
-      switch :verbose
-      switch :debug
     end
   end
 
   def linkage
-    linkage_args.parse
+    args = linkage_args.parse
 
     CacheStoreDatabase.use(:linkage) do |db|
-      kegs = if Homebrew.args.kegs.empty?
-        Formula.installed.map(&:opt_or_installed_prefix_keg).reject(&:nil?)
+      kegs = if args.named.to_kegs.empty?
+        Formula.installed.map(&:any_installed_keg).reject(&:nil?)
       else
-        Homebrew.args.kegs
+        args.named.to_kegs
       end
       kegs.each do |keg|
         ohai "Checking #{keg.name} linkage" if kegs.size > 1

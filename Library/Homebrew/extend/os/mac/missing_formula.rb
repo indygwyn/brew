@@ -1,3 +1,4 @@
+# typed: strict
 # frozen_string_literal: true
 
 require "cask/cmd/abstract_command"
@@ -8,14 +9,27 @@ require "cask/caskroom"
 module Homebrew
   module MissingFormula
     class << self
-      def blacklisted_reason(name)
+      def disallowed_reason(name)
         case name.downcase
         when "xcode"
           <<~EOS
             Xcode can be installed from the App Store.
           EOS
+        when "tex", "tex-live", "texlive", "mactex", "latex"
+          <<~EOS
+            There are three versions of MacTeX.
+
+            Full installation:
+              brew cask install mactex
+
+            Full installation without bundled applications:
+              brew cask install mactex-no-gui
+
+            Minimal installation:
+              brew cask install basictex
+          EOS
         else
-          generic_blacklisted_reason(name)
+          generic_disallowed_reason(name)
         end
       end
 

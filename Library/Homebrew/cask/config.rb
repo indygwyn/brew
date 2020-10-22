@@ -1,19 +1,27 @@
+# typed: false
 # frozen_string_literal: true
 
 require "json"
+
+require "lazy_object"
+require "locale"
 
 require "extend/hash_validator"
 using HashValidator
 
 module Cask
+  # Configuration for installing casks.
+  #
+  # @api private
   class Config
     DEFAULT_DIRS = {
       appdir:               "/Applications",
+      colorpickerdir:       "~/Library/ColorPickers",
       prefpanedir:          "~/Library/PreferencePanes",
       qlplugindir:          "~/Library/QuickLook",
+      mdimporterdir:        "~/Library/Spotlight",
       dictionarydir:        "~/Library/Dictionaries",
       fontdir:              "~/Library/Fonts",
-      colorpickerdir:       "~/Library/ColorPickers",
       servicedir:           "~/Library/Services",
       input_methoddir:      "~/Library/Input Methods",
       internet_plugindir:   "~/Library/Internet Plug-Ins",
@@ -23,25 +31,35 @@ module Cask
       screen_saverdir:      "~/Library/Screen Savers",
     }.freeze
 
-    def self.global
-      @global ||= new
+    def self.defaults
+      {
+        languages: LazyObject.new { MacOS.languages },
+      }.merge(DEFAULT_DIRS).freeze
     end
 
-    def self.clear
-      @global = nil
+    def self.from_args(args)
+      new(explicit: {
+        appdir:               args.appdir,
+        colorpickerdir:       args.colorpickerdir,
+        prefpanedir:          args.prefpanedir,
+        qlplugindir:          args.qlplugindir,
+        mdimporterdir:        args.mdimporterdir,
+        dictionarydir:        args.dictionarydir,
+        fontdir:              args.fontdir,
+        servicedir:           args.servicedir,
+        input_methoddir:      args.input_methoddir,
+        internet_plugindir:   args.internet_plugindir,
+        audio_unit_plugindir: args.audio_unit_plugindir,
+        vst_plugindir:        args.vst_plugindir,
+        vst3_plugindir:       args.vst3_plugindir,
+        screen_saverdir:      args.screen_saverdir,
+        languages:            args.language,
+      }.compact)
     end
 
-    def self.for_cask(cask)
-      if cask.config_path.exist?
-        from_file(cask.config_path)
-      else
-        global
-      end
-    end
-
-    def self.from_file(path)
+    def self.from_json(json)
       config = begin
-        JSON.parse(File.read(path))
+        JSON.parse(json)
       rescue JSON::ParserError => e
         raise e, "Cannot parse #{path}: #{e}", e.backtrace
       end
@@ -68,24 +86,33 @@ module Cask
     attr_accessor :explicit
 
     def initialize(default: nil, env: nil, explicit: {})
-      @default = self.class.canonicalize(default) if default
+      @default = self.class.canonicalize(self.class.defaults.merge(default)) if default
       @env = self.class.canonicalize(env) if env
       @explicit = self.class.canonicalize(explicit)
 
-      @env&.assert_valid_keys!(*DEFAULT_DIRS.keys)
-      @explicit.assert_valid_keys!(*DEFAULT_DIRS.keys)
+      @env&.assert_valid_keys!(*self.class.defaults.keys)
+      @explicit.assert_valid_keys!(*self.class.defaults.keys)
     end
 
     def default
-      @default ||= self.class.canonicalize(DEFAULT_DIRS)
+      @default ||= self.class.canonicalize(self.class.defaults)
     end
 
     def env
       @env ||= self.class.canonicalize(
-        Shellwords.shellsplit(ENV.fetch("HOMEBREW_CASK_OPTS", ""))
-                  .select { |arg| arg.include?("=") }
-                  .map { |arg| arg.split("=", 2) }
-                  .map { |(flag, value)| [flag.sub(/^\-\-/, ""), value] },
+        Homebrew::EnvConfig.cask_opts
+          .select { |arg| arg.include?("=") }
+          .map { |arg| arg.split("=", 2) }
+          .map do |(flag, value)|
+            key = flag.sub(/^--/, "")
+
+            if key == "language"
+              key = "languages"
+              value = value.split(",")
+            end
+
+            [key, value]
+          end,
       )
     end
 
@@ -97,7 +124,25 @@ module Cask
       @manpagedir ||= HOMEBREW_PREFIX/"share/man"
     end
 
-    DEFAULT_DIRS.keys.each do |dir|
+    def languages
+      [
+        *explicit[:languages],
+        *env[:languages],
+        *default[:languages],
+      ].uniq.select do |lang|
+        # Ensure all languages are valid.
+        Locale.parse(lang)
+        true
+      rescue Locale::ParserError
+        false
+      end
+    end
+
+    def languages=(languages)
+      explicit[:languages] = languages
+    end
+
+    DEFAULT_DIRS.each_key do |dir|
       define_method(dir) do
         explicit.fetch(dir, env.fetch(dir, default.fetch(dir)))
       end

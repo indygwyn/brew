@@ -1,8 +1,12 @@
+# typed: true
 # frozen_string_literal: true
 
 require "resource"
 
 module Language
+  # Helper functions for Go formulae.
+  #
+  # @api public
   module Go
     # Given a set of resources, stages them to a gopath for
     # building go software.
@@ -10,7 +14,7 @@ module Language
     # e.g. `resource "github.com/foo/bar"`
     def self.stage_deps(resources, target)
       if resources.empty?
-        if ARGV.homebrew_developer?
+        if Homebrew::EnvConfig.developer?
           odie "tried to stage empty Language::Go resources array"
         else
           opoo "tried to stage empty Language::Go resources array"

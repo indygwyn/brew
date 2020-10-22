@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "download_strategy"
@@ -8,7 +9,10 @@ require "mktemp"
 # Resource is the fundamental representation of an external resource. The
 # primary formula download, along with other declared resources, are instances
 # of this class.
+#
+# @api private
 class Resource
+  include Context
   include FileUtils
 
   attr_reader :mirrors, :specs, :using, :source_modified_time, :patches, :owner
@@ -55,6 +59,10 @@ class Resource
     "#{owner.name}--#{escaped_name}"
   end
 
+  def downloaded?
+    cached_download.exist?
+  end
+
   def cached_download
     downloader.cached_location
   end
@@ -64,20 +72,29 @@ class Resource
   end
 
   # Verifies download and unpacks it.
-  # The block may call `|resource,staging| staging.retain!` to retain the staging
+  # The block may call `|resource, staging| staging.retain!` to retain the staging
   # directory. Subclasses that override stage should implement the tmp
   # dir using {Mktemp} so that works with all subtypes.
+  #
+  # @api public
   def stage(target = nil, &block)
-    raise ArgumentError, "target directory or block is required" unless target || block
+    raise ArgumentError, "target directory or block is required" if !target && block.blank?
 
-    fetch
     prepare_patches
+    fetch_patches(skip_downloaded: true)
+    fetch unless downloaded?
+
     unpack(target, &block)
   end
 
   def prepare_patches
     patches.grep(DATAPatch) { |p| p.path = owner.owner.path }
-    patches.select(&:external?).each(&:fetch)
+  end
+
+  def fetch_patches(skip_downloaded: false)
+    external_patches = patches.select(&:external?)
+    external_patches.reject!(&:downloaded?) if skip_downloaded
+    external_patches.each(&:fetch)
   end
 
   def apply_patches
@@ -114,6 +131,8 @@ class Resource
   def fetch(verify_download_integrity: true)
     HOMEBREW_CACHE.mkpath
 
+    fetch_patches
+
     begin
       downloader.fetch
     rescue ErrorDuringExecution, CurlDownloadStrategyError => e
@@ -127,7 +146,7 @@ class Resource
 
   def verify_download_integrity(fn)
     if fn.file?
-      ohai "Verifying #{fn.basename} checksum" if ARGV.verbose?
+      ohai "Verifying #{fn.basename} checksum" if verbose?
       fn.verify_checksum(checksum)
     end
   rescue ChecksumMissingError
@@ -165,12 +184,22 @@ class Resource
     patches << p
   end
 
+  # Block only executed on macOS. No-op on Linux.
+  # <pre>on_macos do
+  #   url "mac_only_url"
+  # end</pre>
+  def on_macos(&_block); end
+
+  # Block only executed on Linux. No-op on macOS.
+  # <pre>on_linux do
+  #   url "linux_only_url"
+  # end</pre>
+  def on_linux(&_block); end
+
   protected
 
-  def mktemp(prefix)
-    Mktemp.new(prefix).run do |staging|
-      yield staging
-    end
+  def mktemp(prefix, &block)
+    Mktemp.new(prefix).run(&block)
   end
 
   private
@@ -179,7 +208,7 @@ class Resource
     return Version::NULL if val.nil? && url.nil?
 
     case val
-    when nil     then Version.detect(url, specs)
+    when nil     then Version.detect(url, **specs)
     when String  then Version.create(val)
     when Version then val
     else
@@ -187,17 +216,20 @@ class Resource
     end
   end
 
+  # A resource containing a Go package.
   class Go < Resource
     def stage(target)
       super(target/name)
     end
   end
 
+  # A resource containing a patch.
   class PatchResource < Resource
     attr_reader :patch_files
 
     def initialize(&block)
       @patch_files = []
+      @directory = nil
       super "patch", &block
     end
 
@@ -206,12 +238,20 @@ class Resource
       @patch_files.concat(paths)
       @patch_files.uniq!
     end
+
+    def directory(val = nil)
+      return @directory if val.nil?
+
+      @directory = val
+    end
   end
 end
 
 # The context in which a {Resource.stage} occurs. Supports access to both
 # the {Resource} and associated {Mktemp} in a single block argument. The interface
 # is back-compatible with {Resource} itself as used in that context.
+#
+# @api private
 class ResourceStageContext
   extend Forwardable
 
@@ -232,3 +272,5 @@ class ResourceStageContext
     "<#{self.class}: resource=#{resource} staging=#{staging}>"
   end
 end
+
+require "extend/os/resource"

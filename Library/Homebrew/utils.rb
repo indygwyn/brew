@@ -1,6 +1,6 @@
+# typed: false
 # frozen_string_literal: true
 
-require "emoji"
 require "utils/analytics"
 require "utils/curl"
 require "utils/fork"
@@ -10,13 +10,17 @@ require "utils/git"
 require "utils/github"
 require "utils/inreplace"
 require "utils/link"
+require "utils/livecheck_formula"
 require "utils/popen"
+require "utils/repology"
 require "utils/svn"
 require "utils/tty"
 require "tap_constants"
 require "time"
 
 module Homebrew
+  extend Context
+
   module_function
 
   def _system(cmd, *args, **options)
@@ -35,7 +39,7 @@ module Homebrew
   end
 
   def system(cmd, *args, **options)
-    if ARGV.verbose?
+    if verbose?
       puts "#{cmd} #{args * " "}".gsub(RUBY_PATH, "ruby")
                                  .gsub($LOAD_PATH.join(File::PATH_SEPARATOR).to_s, "$LOAD_PATH")
     end
@@ -87,7 +91,13 @@ module Kernel
   end
 
   def ohai_title(title)
-    title = Tty.truncate(title) if $stdout.tty? && !ARGV.verbose?
+    verbose = if respond_to?(:verbose?)
+      verbose?
+    else
+      Context.current.verbose?
+    end
+
+    title = Tty.truncate(title) if $stdout.tty? && !verbose
     Formatter.headline(title, color: :blue)
   end
 
@@ -96,25 +106,41 @@ module Kernel
     puts sput
   end
 
-  def odebug(title, *sput)
-    return unless ARGV.debug?
+  def odebug(title, *sput, always_display: false)
+    debug = if respond_to?(:debug)
+      debug?
+    else
+      Context.current.debug?
+    end
+
+    return unless debug || always_display
 
     puts Formatter.headline(title, color: :magenta)
     puts sput unless sput.empty?
   end
 
-  def oh1(title, options = {})
-    title = Tty.truncate(title) if $stdout.tty? && !ARGV.verbose? && options.fetch(:truncate, :auto) == :auto
+  def oh1(title, truncate: :auto)
+    verbose = if respond_to?(:verbose?)
+      verbose?
+    else
+      Context.current.verbose?
+    end
+
+    title = Tty.truncate(title) if $stdout.tty? && !verbose && truncate == :auto
     puts Formatter.headline(title, color: :green)
   end
 
   # Print a warning (do this rarely)
   def opoo(message)
-    $stderr.puts Formatter.warning(message, label: "Warning")
+    Tty.with($stderr) do |stderr|
+      stderr.puts Formatter.warning(message, label: "Warning")
+    end
   end
 
   def onoe(message)
-    $stderr.puts Formatter.error(message, label: "Error")
+    Tty.with($stderr) do |stderr|
+      stderr.puts Formatter.error(message, label: "Error")
+    end
   end
 
   def ofail(error)
@@ -167,9 +193,9 @@ module Kernel
       next unless match = line.match(HOMEBREW_TAP_PATH_REGEX)
 
       tap = Tap.fetch(match[:user], match[:repo])
-      tap_message = +"\nPlease report this to the #{tap} tap"
+      tap_message = +"\nPlease report this issue to the #{tap} tap (not Homebrew/brew or Homebrew/core)"
       tap_message += ", or even better, submit a PR to fix it" if replacement
-      tap_message << ":\n  #{line.sub(/^(.*\:\d+)\:.*$/, '\1')}\n\n"
+      tap_message << ":\n  #{line.sub(/^(.*:\d+):.*$/, '\1')}\n\n"
       break
     end
 
@@ -177,7 +203,7 @@ module Kernel
     message << tap_message if tap_message
     message.freeze
 
-    if ARGV.homebrew_developer? || disable || Homebrew.raise_deprecation_exceptions?
+    if Homebrew::EnvConfig.developer? || disable || Homebrew.raise_deprecation_exceptions?
       exception = MethodDeprecatedError.new(message)
       exception.set_backtrace(backtrace)
       raise exception
@@ -194,20 +220,20 @@ module Kernel
   def pretty_installed(f)
     if !$stdout.tty?
       f.to_s
-    elsif Emoji.enabled?
-      "#{Tty.bold}#{f} #{Formatter.success("✔")}#{Tty.reset}"
-    else
+    elsif Homebrew::EnvConfig.no_emoji?
       Formatter.success("#{Tty.bold}#{f} (installed)#{Tty.reset}")
+    else
+      "#{Tty.bold}#{f} #{Formatter.success("✔")}#{Tty.reset}"
     end
   end
 
   def pretty_uninstalled(f)
     if !$stdout.tty?
       f.to_s
-    elsif Emoji.enabled?
-      "#{Tty.bold}#{f} #{Formatter.error("✘")}#{Tty.reset}"
-    else
+    elsif Homebrew::EnvConfig.no_emoji?
       Formatter.error("#{Tty.bold}#{f} (uninstalled)#{Tty.reset}")
+    else
+      "#{Tty.bold}#{f} #{Formatter.error("✘")}#{Tty.reset}"
     end
   end
 
@@ -247,16 +273,12 @@ module Kernel
     raise $CHILD_STATUS.inspect
   end
 
-  def with_homebrew_path
-    with_env(PATH: PATH.new(ENV["HOMEBREW_PATH"])) do
-      yield
-    end
+  def with_homebrew_path(&block)
+    with_env(PATH: PATH.new(ENV["HOMEBREW_PATH"]), &block)
   end
 
-  def with_custom_locale(locale)
-    with_env(LC_ALL: locale) do
-      yield
-    end
+  def with_custom_locale(locale, &block)
+    with_env(LC_ALL: locale, &block)
   end
 
   # Kernel.system but with exceptions
@@ -304,10 +326,7 @@ module Kernel
   end
 
   def which_editor
-    editor = ENV.values_at("HOMEBREW_EDITOR", "HOMEBREW_VISUAL")
-                .compact
-                .reject(&:empty?)
-                .first
+    editor = Homebrew::EnvConfig.editor
     return editor if editor
 
     # Find Atom, Sublime Text, Textmate, BBEdit / TextWrangler, or vim
@@ -331,11 +350,11 @@ module Kernel
   end
 
   def exec_browser(*args)
-    browser = ENV["HOMEBREW_BROWSER"]
+    browser = Homebrew::EnvConfig.browser
     browser ||= OS::PATH_OPEN if defined?(OS::PATH_OPEN)
     return unless browser
 
-    ENV["DISPLAY"] = ENV["HOMEBREW_DISPLAY"]
+    ENV["DISPLAY"] = Homebrew::EnvConfig.display
 
     safe_system(browser, *args)
   end
@@ -373,12 +392,12 @@ module Kernel
   end
 
   def nostdout
-    if ARGV.verbose?
+    if verbose?
       yield
     else
       begin
         out = $stdout.dup
-        $stdout.reopen("/dev/null")
+        $stdout.reopen(File::NULL)
         yield
       ensure
         $stdout.reopen(out)
@@ -441,13 +460,13 @@ module Kernel
     n_back_bytes = max_bytes_in - n_front_bytes
     if n_front_bytes.zero?
       front = bytes[1..0]
-      back = bytes[-max_bytes_in..-1]
+      back = bytes[-max_bytes_in..]
     elsif n_back_bytes.zero?
       front = bytes[0..(max_bytes_in - 1)]
       back = bytes[1..0]
     else
       front = bytes[0..(n_front_bytes - 1)]
-      back = bytes[-n_back_bytes..-1]
+      back = bytes[-n_back_bytes..]
     end
     out = front + glue_bytes + back
     out.force_encoding("UTF-8")
@@ -495,10 +514,6 @@ module Kernel
         a <=> b
       end
     end
-  end
-
-  def command_help_lines(path)
-    path.read.lines.grep(/^#:/).map { |line| line.slice(2..-1) }
   end
 
   def redact_secrets(input, secrets)

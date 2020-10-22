@@ -1,6 +1,8 @@
+# typed: false
 # frozen_string_literal: true
 
 module UnpackStrategy
+  # Strategy for unpacking uncompressed files.
   class Uncompressed
     include UnpackStrategy
 

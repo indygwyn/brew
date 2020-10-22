@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cli/parser"
@@ -18,12 +19,12 @@ module Homebrew
   end
 
   def __repository
-    __repository_args.parse
+    args = __repository_args.parse
 
-    if ARGV.named.empty?
+    if args.no_named?
       puts HOMEBREW_REPOSITORY
     else
-      puts ARGV.named.map { |tap| Tap.fetch(tap).path }
+      puts args.named.map { |tap| Tap.fetch(tap).path }
     end
   end
 end

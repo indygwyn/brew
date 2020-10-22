@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "dependency_collector"
@@ -32,6 +33,10 @@ describe DependencyCollector do
   specify "Resource dependency from a Subversion URL" do
     resource = Resource.new
     resource.url("svn://brew.sh/foo/bar")
-    expect(subject.add(resource)).to be nil
+    if MacOS.version < :catalina
+      expect(subject.add(resource)).to be nil
+    else
+      expect(subject.add(resource)).not_to be nil
+    end
   end
 end

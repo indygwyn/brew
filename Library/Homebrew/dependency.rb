@@ -1,8 +1,11 @@
+# typed: false
 # frozen_string_literal: true
 
 require "dependable"
 
 # A dependency on another Homebrew formula.
+#
+# @api private
 class Dependency
   extend Forwardable
   include Dependable
@@ -10,6 +13,7 @@ class Dependency
   attr_reader :name, :tags, :env_proc, :option_names
 
   DEFAULT_ENV_PROC = proc {}.freeze
+  private_constant :DEFAULT_ENV_PROC
 
   def initialize(name, tags = [], env_proc = DEFAULT_ENV_PROC, option_names = [name])
     raise ArgumentError, "Dependency must have a name!" unless name
@@ -88,9 +92,6 @@ class Dependency
 
       deps.each do |dep|
         next if dependent.name == dep.name
-
-        # we only care about one level of test dependencies.
-        next if dep.test? && @expand_stack.length > 1
 
         case action(dependent, dep, &block)
         when :prune
@@ -179,6 +180,7 @@ class Dependency
   end
 end
 
+# A dependency on another Homebrew formula in a specific tap.
 class TapDependency < Dependency
   attr_reader :tap
 

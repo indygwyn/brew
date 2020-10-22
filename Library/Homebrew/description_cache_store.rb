@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "set"
@@ -55,7 +56,7 @@ class DescriptionCacheStore < CacheStore
                                renamings.map(&:first))
   end
 
-  # Use an array of formulae names to update the `DescriptionCacheStore`.
+  # Use an array of formula names to update the `DescriptionCacheStore`.
   #
   # @param formula_names [Array] the formulae to update
   # @return [nil]
@@ -69,7 +70,7 @@ class DescriptionCacheStore < CacheStore
     end
   end
 
-  # Use an array of formulae names to delete them from the `DescriptionCacheStore`.
+  # Use an array of formula names to delete them from the `DescriptionCacheStore`.
   #
   # @param formula_names [Array] the formulae to delete
   # @return [nil]
@@ -80,11 +81,6 @@ class DescriptionCacheStore < CacheStore
   end
 
   private
-
-  # Not implemented; access is through `Searchable`.
-  def fetch
-    super
-  end
 
   # `select` from the underlying database.
   def select(&block)

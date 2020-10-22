@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -14,16 +15,15 @@ module Homebrew
         Pin the specified <formula>, preventing them from being upgraded when
         issuing the `brew upgrade` <formula> command. See also `unpin`.
       EOS
-      switch :debug
+
+      min_named :formula
     end
   end
 
   def pin
-    pin_args.parse
+    args = pin_args.parse
 
-    raise FormulaUnspecifiedError if args.remaining.empty?
-
-    Homebrew.args.resolved_formulae.each do |f|
+    args.named.to_resolved_formulae.each do |f|
       if f.pinned?
         opoo "#{f.name} already pinned"
       elsif !f.pinnable?

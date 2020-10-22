@@ -1,17 +1,20 @@
+# typed: true
 # frozen_string_literal: true
 
 require "unpack_strategy"
 
 module Cask
   class DSL
+    # Class corresponding to the `container` stanza.
+    #
+    # @api private
     class Container
       VALID_KEYS = Set.new([
                              :type,
                              :nested,
                            ]).freeze
 
-      attr_accessor(*VALID_KEYS)
-      attr_accessor :pairs
+      attr_accessor(*VALID_KEYS, :pairs)
 
       def initialize(pairs = {})
         @pairs = pairs

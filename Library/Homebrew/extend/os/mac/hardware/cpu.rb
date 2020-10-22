@@ -1,4 +1,7 @@
+# typed: false
 # frozen_string_literal: true
+
+require "macho"
 
 module Hardware
   class CPU
@@ -9,8 +12,10 @@ module Hardware
       # Look in <mach/machine.h> for decoding info.
       def type
         case sysctl_int("hw.cputype")
-        when 7
+        when MachO::Headers::CPU_TYPE_I386
           :intel
+        when MachO::Headers::CPU_TYPE_ARM64
+          :arm
         else
           :dunno
         end
@@ -40,6 +45,10 @@ module Hardware
           :skylake
         when 0x0f817246 # Kaby Lake
           :kabylake
+        when 0x38435547 # Ice Lake
+          :icelake
+        when 0x07d34b9f # ARMv8.3-A (Vortex, Tempest)
+          :arm_vortex_tempest
         else
           :dunno
         end
@@ -53,6 +62,14 @@ module Hardware
         # order is used.
         # https://superuser.com/questions/740563/gcc-4-8-on-macos-fails-depending-on-arch-order
         [arch_64_bit, arch_32_bit].extend ArchitectureListExtension
+      end
+
+      # True when running under an Intel-based shell via Rosetta on an
+      # Apple Silicon Mac. This can be detected via seeing if there's a
+      # conflict between what `uname` report and the underlying `sysctl` flags,
+      # since the `sysctl` flags don't change behaviour under Rosetta.
+      def in_rosetta?
+        intel? && physical_cpu_arm64?
       end
 
       def features
@@ -100,6 +117,12 @@ module Hardware
       end
 
       private
+
+      # Note: this is more reliable than checking uname.
+      # `sysctl` returns the right answer even when running in Rosetta.
+      def physical_cpu_arm64?
+        sysctl_bool("hw.optional.arm64")
+      end
 
       def sysctl_bool(key)
         sysctl_int(key) == 1

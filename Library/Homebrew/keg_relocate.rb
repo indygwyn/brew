@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 class Keg
@@ -117,6 +118,10 @@ class Keg
     path/"lib"
   end
 
+  def libexec
+    path/"libexec"
+  end
+
   def text_files
     text_files = []
     return text_files unless which("file") && which("xargs")
@@ -166,7 +171,7 @@ class Keg
     libtool_files = []
 
     path.find do |pn|
-      next if pn.symlink? || pn.directory? || ![".la", ".lai"].include?(pn.extname)
+      next if pn.symlink? || pn.directory? || !Keg::LIBTOOL_EXTENSIONS.include?(pn.extname)
 
       libtool_files << pn
     end

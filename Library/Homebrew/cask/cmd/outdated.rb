@@ -1,38 +1,35 @@
+# typed: false
 # frozen_string_literal: true
 
 module Cask
   class Cmd
+    # Implementation of the `brew cask outdated` command.
+    #
+    # @api private
     class Outdated < AbstractCommand
-      option "--greedy", :greedy, false
-      option "--quiet",  :quiet, false
+      def self.description
+        "List the outdated installed casks."
+      end
 
-      def initialize(*)
-        super
-        self.verbose = ($stdout.tty? || verbose?) && !quiet?
+      def self.parser
+        super do
+          switch "--greedy",
+                 description: "Also include casks which specify `auto_updates true` or `version :latest`."
+          switch "--json",
+                 description: "Print a JSON representation of outdated casks."
+        end
       end
 
       def run
-        casks(alternative: -> { Caskroom.casks }).each do |cask|
+        outdated_casks = casks(alternative: -> { Caskroom.casks(config: Config.from_args(args)) }).select do |cask|
           odebug "Checking update info of Cask #{cask}"
-          self.class.list_if_outdated(cask, greedy?, verbose?)
+          cask.outdated?(greedy: args.greedy?)
         end
-      end
 
-      def self.list_if_outdated(cask, greedy, verbose)
-        return unless cask.outdated?(greedy)
+        verbose = ($stdout.tty? || args.verbose?) && !args.quiet?
+        output = outdated_casks.map { |cask| cask.outdated_info(args.greedy?, verbose, args.json?) }
 
-        if verbose
-          outdated_versions = cask.outdated_versions(greedy)
-          outdated_info   = "#{cask.token} (#{outdated_versions.join(", ")})"
-          current_version = cask.version.to_s
-          puts "#{outdated_info} != #{current_version}"
-        else
-          puts cask.token
-        end
-      end
-
-      def self.help
-        "list the outdated installed Casks"
+        puts args.json? ? JSON.generate(output) : output
       end
     end
   end

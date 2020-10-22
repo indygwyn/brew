@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "English"
@@ -6,15 +7,21 @@ require "json/add/exception"
 require "pathname"
 require "ostruct"
 require "pp"
+require "forwardable"
 
 require_relative "load_path"
 
 require "rubygems"
+# Only require "core_ext" here to ensure we're only requiring the minimum of
+# what we need.
 require "active_support/core_ext/object/blank"
 require "active_support/core_ext/numeric/time"
+require "active_support/core_ext/object/try"
 require "active_support/core_ext/array/access"
-require "active_support/i18n"
-require "active_support/inflector/inflections"
+require "active_support/core_ext/string/inflections"
+require "active_support/core_ext/array/conversions"
+require "active_support/core_ext/hash/deep_merge"
+require "active_support/core_ext/file/atomic"
 
 I18n.backend.available_locales # Initialize locales so they can be overwritten.
 I18n.backend.store_translations :en, support: { array: { last_word_connector: " and " } }
@@ -25,14 +32,25 @@ ActiveSupport::Inflector.inflections(:en) do |inflect|
   inflect.irregular "it", "they"
 end
 
+require "utils/sorbet"
+
+HOMEBREW_BOTTLE_DEFAULT_DOMAIN = ENV["HOMEBREW_BOTTLE_DEFAULT_DOMAIN"]
+HOMEBREW_BREW_DEFAULT_GIT_REMOTE = ENV["HOMEBREW_BREW_DEFAULT_GIT_REMOTE"]
+HOMEBREW_CORE_DEFAULT_GIT_REMOTE = ENV["HOMEBREW_CORE_DEFAULT_GIT_REMOTE"]
+HOMEBREW_DEFAULT_CACHE = ENV["HOMEBREW_DEFAULT_CACHE"]
+HOMEBREW_DEFAULT_LOGS = ENV["HOMEBREW_DEFAULT_LOGS"]
+HOMEBREW_DEFAULT_TEMP = ENV["HOMEBREW_DEFAULT_TEMP"]
+HOMEBREW_REQUIRED_RUBY_VERSION = ENV["HOMEBREW_REQUIRED_RUBY_VERSION"]
+require "env_config"
+
 require "config"
 require "os"
-require "extend/ARGV"
+require "context"
+require "extend/pathname"
+require "extend/predicable"
+require "extend/module"
+require "cli/args"
 require "messages"
-require "system_command"
-
-ARGV_WITHOUT_MONKEY_PATCHING = ARGV.dup.freeze
-ARGV.extend(HomebrewArgvExtension)
 
 HOMEBREW_PRODUCT = ENV["HOMEBREW_PRODUCT"]
 HOMEBREW_VERSION = ENV["HOMEBREW_VERSION"]
@@ -50,17 +68,10 @@ HOMEBREW_USER_AGENT_FAKE_SAFARI =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) AppleWebKit/602.4.8 " \
   "(KHTML, like Gecko) Version/10.0.3 Safari/602.4.8"
 
-HOMEBREW_BOTTLE_DEFAULT_DOMAIN = ENV["HOMEBREW_BOTTLE_DEFAULT_DOMAIN"]
-HOMEBREW_BOTTLE_DOMAIN = ENV["HOMEBREW_BOTTLE_DOMAIN"]
-
-HOMEBREW_BREW_GIT_REMOTE = ENV["HOMEBREW_BREW_GIT_REMOTE"]
-HOMEBREW_CORE_GIT_REMOTE = ENV["HOMEBREW_CORE_GIT_REMOTE"]
-
 HOMEBREW_DEFAULT_PREFIX = "/usr/local"
 LINUXBREW_DEFAULT_PREFIX = "/home/linuxbrew/.linuxbrew"
 
 require "fileutils"
-require "os"
 require "os/global"
 
 module Homebrew
@@ -83,7 +94,7 @@ module Homebrew
     end
 
     def args
-      @args ||= OpenStruct.new
+      @args ||= CLI::Args.new
     end
 
     def messages
@@ -104,8 +115,9 @@ HOMEBREW_PULL_API_REGEX =
   %r{https://api\.github\.com/repos/([\w-]+)/([\w-]+)?/pulls/(\d+)}.freeze
 HOMEBREW_PULL_OR_COMMIT_URL_REGEX =
   %r[https://github\.com/([\w-]+)/([\w-]+)?/(?:pull/(\d+)|commit/[0-9a-fA-F]{4,40})].freeze
+HOMEBREW_RELEASES_URL_REGEX =
+  %r{https://github\.com/([\w-]+)/([\w-]+)?/releases/download/(.+)}.freeze
 
-require "forwardable"
 require "PATH"
 
 ENV["HOMEBREW_PATH"] ||= ENV["PATH"]
@@ -115,36 +127,11 @@ rescue
   nil
 end.compact.freeze
 
-HOMEBREW_INTERNAL_COMMAND_ALIASES = {
-  "ls"          => "list",
-  "homepage"    => "home",
-  "-S"          => "search",
-  "up"          => "update",
-  "ln"          => "link",
-  "instal"      => "install", # gem does the same
-  "uninstal"    => "uninstall",
-  "rm"          => "uninstall",
-  "remove"      => "uninstall",
-  "configure"   => "diy",
-  "abv"         => "info",
-  "dr"          => "doctor",
-  "--repo"      => "--repository",
-  "environment" => "--env",
-  "--config"    => "config",
-  "-v"          => "--version",
-}.freeze
-
 require "set"
 
-require "extend/pathname"
-
-require "extend/module"
-require "extend/predicable"
 require "extend/string"
-require "active_support/core_ext/object/blank"
-require "active_support/core_ext/hash/deep_merge"
-require "active_support/core_ext/file/atomic"
 
+require "system_command"
 require "exceptions"
 require "utils"
 
@@ -152,4 +139,4 @@ require "official_taps"
 require "tap"
 require "tap_constants"
 
-require "compat" if !ARGV.include?("--no-compat") && !ENV["HOMEBREW_NO_COMPAT"]
+require "compat" unless Homebrew::EnvConfig.no_compat?

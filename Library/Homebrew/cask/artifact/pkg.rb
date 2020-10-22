@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "plist"
@@ -10,15 +11,16 @@ using HashValidator
 
 module Cask
   module Artifact
+    # Artifact corresponding to the `pkg` stanza.
+    #
+    # @api private
     class Pkg < AbstractArtifact
-      attr_reader :pkg_relative_path
+      attr_reader :pkg_relative_path, :path, :stanza_options
 
       def self.from_args(cask, path, **stanza_options)
         stanza_options.assert_valid_keys!(:allow_untrusted, :choices)
         new(cask, path, **stanza_options)
       end
-
-      attr_reader :path, :stanza_options
 
       def initialize(cask, path, **stanza_options)
         super(cask)

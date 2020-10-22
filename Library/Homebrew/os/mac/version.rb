@@ -1,41 +1,47 @@
+# typed: true
 # frozen_string_literal: true
 
+require "hardware"
 require "version"
 
 module OS
   module Mac
+    # A macOS version.
+    #
+    # @api private
     class Version < ::Version
       SYMBOLS = {
+        big_sur:     "11.0",
         catalina:    "10.15",
         mojave:      "10.14",
         high_sierra: "10.13",
         sierra:      "10.12",
         el_capitan:  "10.11",
         yosemite:    "10.10",
-        mavericks:   "10.9",
       }.freeze
 
       def self.from_symbol(sym)
-        str = SYMBOLS.fetch(sym) do
-          raise ArgumentError, "unknown version #{sym.inspect}"
-        end
+        str = SYMBOLS.fetch(sym) { raise MacOSVersionError, sym }
         new(str)
       end
 
-      def initialize(*args)
-        super
+      def initialize(value)
+        super(value)
+
+        raise MacOSVersionError, value unless value.match?(/\A1\d+(?:\.\d+){0,2}\Z/)
+
         @comparison_cache = {}
       end
 
       def <=>(other)
         @comparison_cache.fetch(other) do
           v = SYMBOLS.fetch(other) { other.to_s }
-          @comparison_cache[other] = super(Version.new(v))
+          @comparison_cache[other] = super(::Version.new(v))
         end
       end
 
       def to_sym
-        SYMBOLS.invert.fetch(@version) { :dunno }
+        SYMBOLS.invert.fetch(@version, :dunno)
       end
 
       def pretty_name
@@ -44,6 +50,10 @@ module OS
 
       # For OS::Mac::Version compatibility
       def requires_nehalem_cpu?
+        unless Hardware::CPU.intel?
+          raise "Unexpected architecture: #{Hardware::CPU.arch}. This only works with Intel architecture."
+        end
+
         Hardware.oldest_cpu(self) == :nehalem
       end
       # https://en.wikipedia.org/wiki/Nehalem_(microarchitecture)

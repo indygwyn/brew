@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -14,18 +15,15 @@ module Homebrew
 
         Symlink all of the specified <version> of <formula>'s installation into Homebrew's prefix.
       EOS
-      switch :verbose
-      switch :debug
-      max_named 2
+
+      named 2
     end
   end
 
   def switch
-    switch_args.parse
+    args = switch_args.parse
 
-    raise FormulaUnspecifiedError if args.remaining.empty?
-
-    name = args.remaining.first
+    name = args.named.first
     rack = Formulary.to_rack(name)
 
     odie "#{name} not found in the Cellar." unless rack.directory?
@@ -34,8 +32,7 @@ module Homebrew
                    .map { |d| Keg.new(d).version }
                    .sort
                    .join(", ")
-    version = args.remaining.second
-    raise UsageError, "Specify one of #{name}'s installed versions: #{versions}" unless version
+    version = args.named.second
 
     odie <<~EOS unless (rack/version).directory?
       #{name} does not have a version \"#{version}\" in the Cellar.
@@ -53,7 +50,7 @@ module Homebrew
 
     # Link new version, if not keg-only
     if Formulary.keg_only?(rack)
-      keg.optlink
+      keg.optlink(verbose: args.verbose?)
       puts "Opt link created for #{keg}"
     else
       puts "#{keg.link} links created for #{keg}"

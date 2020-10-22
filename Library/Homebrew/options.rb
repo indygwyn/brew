@@ -1,5 +1,9 @@
+# typed: false
 # frozen_string_literal: true
 
+# A formula option.
+#
+# @api private
 class Option
   attr_reader :name, :description, :flag
 
@@ -33,6 +37,9 @@ class Option
   end
 end
 
+# A deprecated formula option.
+#
+# @api private
 class DeprecatedOption
   attr_reader :old, :current
 
@@ -55,11 +62,14 @@ class DeprecatedOption
   alias eql? ==
 end
 
+# A collection of formula options.
+#
+# @api private
 class Options
   include Enumerable
 
   def self.create(array)
-    new array.map { |e| Option.new(e[/^--([^=]+=?)(.+)?$/, 1] || e) }
+    new Array(array).map { |e| Option.new(e[/^--([^=]+=?)(.+)?$/, 1] || e) }
   end
 
   def initialize(*args)
@@ -112,16 +122,11 @@ class Options
   def inspect
     "#<#{self.class.name}: #{to_a.inspect}>"
   end
-end
 
-module Homebrew
-  module_function
-
-  def dump_options_for_formula(f)
+  def self.dump_for_formula(f)
     f.options.sort_by(&:flag).each do |opt|
       puts "#{opt.flag}\n\t#{opt.description}"
     end
-    puts "--devel\n\tInstall development version #{f.devel.version}" if f.devel
     puts "--HEAD\n\tInstall HEAD version" if f.head
   end
 end

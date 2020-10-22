@@ -1,5 +1,7 @@
+# typed: false
 # frozen_string_literal: true
 
+require "cli/args"
 require "extend/ENV"
 require "requirement"
 

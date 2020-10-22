@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "rubocops/extend/formula"
@@ -13,7 +14,7 @@ module RuboCop
         def audit_formula(_node, _class_node, _parent_class_node, body_node)
           check_dependency_nodes_order(body_node)
           check_uses_from_macos_nodes_order(body_node)
-          [:devel, :head, :stable].each do |block_name|
+          [:head, :stable].each do |block_name|
             block = find_block(body_node, block_name)
             next unless block
 
@@ -126,7 +127,7 @@ module RuboCop
 
         # Node pattern method to extract `name` in `depends_on :name` or `uses_from_macos :name`
         def_node_search :dependency_name_node, <<~EOS
-          {(send nil? {:depends_on :uses_from_macos} {(hash (pair $_ _)) $({str sym} _) $(const nil? _)})
+          {(send nil? {:depends_on :uses_from_macos} {(hash (pair $_ _) ...) $({str sym} _) $(const nil? _)} ...)
            (if _ (send nil? :depends_on {(hash (pair $_ _)) $({str sym} _) $(const nil? _)}) nil?)}
         EOS
 

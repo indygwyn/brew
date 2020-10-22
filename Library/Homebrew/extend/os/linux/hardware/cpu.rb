@@ -1,24 +1,15 @@
+# typed: false
 # frozen_string_literal: true
 
 module Hardware
   class CPU
     class << self
-      native_arch = (ENV["HOMEBREW_ARCH"] || "native").freeze
-      OPTIMIZATION_FLAGS_LINUX = {
-        native:  "-march=#{native_arch}",
-        nehalem: "-march=nehalem",
-        core2:   "-march=core2",
-        core:    "-march=prescott",
-        armv6:   "-march=armv6",
-        armv8:   "-march=armv8-a",
-      }.freeze
-
       def optimization_flags
-        OPTIMIZATION_FLAGS_LINUX
-      end
-
-      def cpuinfo
-        @cpuinfo ||= File.read("/proc/cpuinfo")
+        @optimization_flags ||= begin
+          flags = generic_optimization_flags.dup
+          flags[:native] = arch_flag(Homebrew::EnvConfig.arch)
+          flags
+        end
       end
 
       def family
@@ -27,7 +18,7 @@ module Hardware
         return :dunno unless intel?
 
         # See https://software.intel.com/en-us/articles/intel-architecture-and-processor-identification-with-cpuid-model-and-family-numbers
-        # and https://github.com/llvm-mirror/llvm/blob/master/lib/Support/Host.cpp
+        # and https://github.com/llvm-mirror/llvm/blob/HEAD/lib/Support/Host.cpp
         # and https://en.wikipedia.org/wiki/List_of_Intel_CPU_microarchitectures#Roadmap
         cpu_family = cpuinfo[/^cpu family\s*: ([0-9]+)/, 1].to_i
         cpu_model = cpuinfo[/^model\s*: ([0-9]+)/, 1].to_i
@@ -49,14 +40,18 @@ module Hardware
             :merom
           when 0x0d
             :dothan
-          when 0x36, 0x26, 0x1c
+          when 0x1c, 0x26, 0x27, 0x35, 0x36
             :atom
-          when 0x3c, 0x3f, 0x46
+          when 0x3c, 0x3f, 0x45, 0x46
             :haswell
           when 0x3d, 0x47, 0x4f, 0x56
             :broadwell
           when 0x4e, 0x55, 0x5e, 0x8e, 0x9e
             :skylake
+          when 0x66
+            :cannonlake
+          when 0x6a, 0x6c, 0x7d, 0x7e
+            :icelake
           else
             unknown
           end
@@ -82,11 +77,11 @@ module Hardware
       # Compatibility with Mac method, which returns lowercase symbols
       # instead of strings
       def features
-        @features ||= flags[1..-1].map(&:intern)
+        @features ||= flags[1..].map(&:intern)
       end
 
       %w[aes altivec avx avx2 lm ssse3 sse4_2].each do |flag|
-        define_method(flag + "?") { flags.include? flag }
+        define_method("#{flag}?") { flags.include? flag }
       end
 
       def sse3?
@@ -95,6 +90,12 @@ module Hardware
 
       def sse4?
         flags.include? "sse4_1"
+      end
+
+      private
+
+      def cpuinfo
+        @cpuinfo ||= File.read("/proc/cpuinfo")
       end
     end
   end

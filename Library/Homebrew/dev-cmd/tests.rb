@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cli/parser"
@@ -22,22 +23,25 @@ module Homebrew
       switch "--online",
              description: "Include tests that use the GitHub API and tests that use any of the taps for "\
                           "official external commands."
+      switch "--byebug",
+             description: "Enable debugging using byebug."
       flag   "--only=",
              description: "Run only <test_script>`_spec.rb`. Appending `:`<line_number> will start at a "\
                           "specific line."
       flag   "--seed=",
              description: "Randomise tests with the specified <value> instead of a random seed."
-      switch :verbose
-      switch :debug
+
       max_named 0
     end
   end
 
   def tests
-    tests_args.parse
+    args = tests_args.parse
 
     Homebrew.install_bundler_gems!
     gem_user_dir = Gem.user_dir
+
+    require "byebug" if args.byebug?
 
     HOMEBREW_LIBRARY_PATH.cd do
       ENV.delete("HOMEBREW_COLOR")
@@ -55,6 +59,7 @@ module Homebrew
       ENV["HOMEBREW_NO_COMPAT"] = "1" if args.no_compat?
       ENV["HOMEBREW_TEST_GENERIC_OS"] = "1" if args.generic?
       ENV["HOMEBREW_TEST_ONLINE"] = "1" if args.online?
+      ENV["HOMEBREW_SORBET_RUNTIME"] = "1"
 
       ENV["USER"] ||= system_command!("id", args: ["-nu"]).stdout.chomp
 
@@ -114,6 +119,8 @@ module Homebrew
         --format ParallelTests::RSpec::RuntimeLogger
         --out #{HOMEBREW_CACHE}/tests/parallel_runtime_rspec.log
       ]
+
+      bundle_args << "--format" << "RSpec::Github::Formatter" if ENV["GITHUB_ACTIONS"]
 
       unless OS.mac?
         bundle_args << "--tag" << "~needs_macos" << "--tag" << "~cask"

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require_relative "shared_examples/requires_cask_token"
@@ -20,7 +21,7 @@ describe Cask::Cmd::Edit, :cask do
   it "raises an error when given more than one argument" do
     expect {
       described_class.new("local-caffeine", "local-transmission")
-    }.to raise_error(/Only one Cask can be edited at a time\./)
+    }.to raise_error(UsageError, /Only one cask can be edited at a time\./)
   end
 
   it "raises an exception when the Cask doesn't exist" do

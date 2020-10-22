@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "os/mac/version"
@@ -7,12 +8,13 @@ require "os/mac/sdk"
 require "os/mac/keg"
 
 module OS
+  # Helper module for querying system information on macOS.
   module Mac
     module_function
 
     # rubocop:disable Naming/ConstantName
     # rubocop:disable Style/MutableConstant
-    ::MacOS = self
+    ::MacOS = OS::Mac
     # rubocop:enable Naming/ConstantName
     # rubocop:enable Style/MutableConstant
 
@@ -21,7 +23,7 @@ module OS
     # This can be compared to numerics, strings, or symbols
     # using the standard Ruby Comparable methods.
     def version
-      @version ||= Version.new(full_version.to_s[/10\.\d+/])
+      @version ||= Version.new(full_version.to_s[/^\d+\.\d+/])
     end
 
     # This can be compared to numerics, strings, or symbols
@@ -43,14 +45,14 @@ module OS
     def latest_stable_version
       # TODO: bump version when new macOS is released and also update
       # references in docs/Installation.md and
-      # https://github.com/Homebrew/install/blob/master/install
+      # https://github.com/Homebrew/install/blob/HEAD/install
       Version.new "10.15"
     end
 
     def outdated_release?
       # TODO: bump version when new macOS is released and also update
       # references in docs/Installation.md and
-      # https://github.com/Homebrew/install/blob/master/install
+      # https://github.com/Homebrew/install/blob/HEAD/install
       version < "10.13"
     end
 
@@ -59,11 +61,16 @@ module OS
     end
 
     def languages
-      @languages ||= [
-        *ARGV.value("language")&.split(","),
-        *ENV["HOMEBREW_LANGUAGES"]&.split(","),
-        *Open3.capture2("defaults", "read", "-g", "AppleLanguages")[0].scan(/[^ \n"(),]+/),
-      ].uniq
+      return @languages if @languages
+
+      os_langs = Utils.popen_read("defaults", "read", "-g", "AppleLanguages")
+      if os_langs.blank?
+        # User settings don't exist so check the system-wide one.
+        os_langs = Utils.popen_read("defaults", "read", "/Library/Preferences/.GlobalPreferences", "AppleLanguages")
+      end
+      os_langs = os_langs.scan(/[^ \n"(),]+/)
+
+      @languages = os_langs
     end
 
     def language
@@ -74,6 +81,17 @@ module OS
       @active_developer_dir ||= Utils.popen_read("/usr/bin/xcode-select", "-print-path").strip
     end
 
+    def sdk_root_needed?
+      if MacOS::CLT.installed?
+        # If there's no CLT SDK, return false
+        return false unless MacOS::CLT.provides_sdk?
+        # If the CLT is installed and headers are provided by the system, return false
+        return false unless MacOS::CLT.separate_header_package?
+      end
+
+      true
+    end
+
     # If a specific SDK is requested:
     #
     #   1. The requested SDK is returned, if it's installed.
@@ -81,26 +99,26 @@ module OS
     #      are available) is returned.
     #   3. If no SDKs are available, nil is returned.
     #
-    # If no specific SDK is requested:
-    #
-    #   1. For Xcode >= 7, the latest SDK is returned even if the latest SDK is
-    #      named after a newer OS version than the running OS. The
-    #      `MACOSX_DEPLOYMENT_TARGET` must be set to the OS for which you're
-    #      actually building (usually the running OS version).
-    #      - https://github.com/Homebrew/legacy-homebrew/pull/50355
-    #      - https://developer.apple.com/library/ios/documentation/DeveloperTools/Conceptual/WhatsNewXcode/Articles/Introduction.html#//apple_ref/doc/uid/TP40004626
-    #      Section "About SDKs and Simulator"
-    #   2. For Xcode < 7, proceed as if the SDK for the running OS version had
-    #      specifically been requested according to the rules above.
+    # If no specific SDK is requested, the SDK matching the OS version is returned,
+    # if available. Otherwise, the latest SDK is returned.
+
+    def sdk_locator
+      if CLT.installed? && CLT.provides_sdk?
+        CLT.sdk_locator
+      else
+        Xcode.sdk_locator
+      end
+    end
 
     def sdk(v = nil)
-      @locator ||= if Xcode.installed?
-        XcodeSDKLocator.new
-      else
-        CLTSDKLocator.new
-      end
+      sdk_locator.sdk_if_applicable(v)
+    end
 
-      @locator.sdk_if_applicable(v)
+    def sdk_for_formula(f, v = nil)
+      # If the formula requires Xcode, don't return the CLT SDK
+      return Xcode.sdk if f.requirements.any? { |req| req.is_a? XcodeRequirement }
+
+      sdk(v)
     end
 
     # Returns the path to an SDK or nil, following the rules set by {.sdk}.
@@ -110,7 +128,7 @@ module OS
     end
 
     def sdk_path_if_needed(v = nil)
-      # Prefer Xcode SDK when both Xcode and the CLT are installed.
+      # Prefer CLT SDK when both Xcode and the CLT are installed.
       # Expected results:
       # 1. On Xcode-only systems, return the Xcode SDK.
       # 2. On Xcode-and-CLT systems where headers are provided by the system, return nil.
@@ -118,10 +136,7 @@ module OS
       # 4. On CLT-only systems with a CLT SDK, where headers are provided by the system, return nil.
       # 5. On CLT-only systems with a CLT SDK, where headers are not provided by the system, return the CLT SDK.
 
-      # If there's no CLT SDK, return early
-      return if MacOS::CLT.installed? && !MacOS::CLT.provides_sdk?
-      # If the CLT is installed and provides headers, return early
-      return if MacOS::CLT.installed? && !MacOS::CLT.separate_header_package?
+      return unless sdk_root_needed?
 
       sdk_path(v)
     end
@@ -160,14 +175,6 @@ module OS
       paths.uniq
     end
 
-    def preferred_arch
-      if Hardware::CPU.is_64_bit?
-        Hardware::CPU.arch_64_bit
-      else
-        Hardware::CPU.arch_32_bit
-      end
-    end
-
     def app_with_bundle_id(*ids)
       path = mdfind(*ids)
              .reject { |p| p.include?("/Backups.backupdb/") }
@@ -189,14 +196,6 @@ module OS
 
     def mdfind_query(*ids)
       ids.map! { |id| "kMDItemCFBundleIdentifier == #{id}" }.join(" || ")
-    end
-
-    def tcc_db
-      @tcc_db ||= Pathname.new("/Library/Application Support/com.apple.TCC/TCC.db")
-    end
-
-    def pre_mavericks_accessibility_dotfile
-      @pre_mavericks_accessibility_dotfile ||= Pathname.new("/private/var/db/.AccessibilityAPIEnabled")
     end
   end
 end

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "hardware"
@@ -11,8 +12,8 @@ module Stdenv
   SAFE_CFLAGS_FLAGS = "-w -pipe"
 
   # @private
-  def setup_build_environment(formula = nil)
-    super
+  def setup_build_environment(**options)
+    super(**options)
 
     self["HOMEBREW_ENV"] = "std"
 
@@ -46,9 +47,9 @@ module Stdenv
 
     send(compiler)
 
-    return unless cc =~ GNU_GCC_REGEXP
+    return unless cc.match?(GNU_GCC_REGEXP)
 
-    gcc_formula = gcc_version_formula($&)
+    gcc_formula = gcc_version_formula(cc)
     append_path "PATH", gcc_formula.opt_bin.to_s
   end
   alias generic_setup_build_environment setup_build_environment
@@ -110,12 +111,14 @@ module Stdenv
   end
 
   def clang
-    super
+    super()
     replace_in_cflags(/-Xarch_#{Hardware::CPU.arch_32_bit} (-march=\S*)/, '\1')
-    # Clang mistakenly enables AES-NI on plain Nehalem
-    map = Hardware::CPU.optimization_flags
-                       .merge(nehalem: "-march=nehalem -Xclang -target-feature -Xclang -aes")
-    set_cpu_cflags map
+    map = Hardware::CPU.optimization_flags.dup
+    if DevelopmentTools.clang_build_version < 700
+      # Clang mistakenly enables AES-NI on plain Nehalem
+      map[:nehalem] = "-march=nehalem -Xclang -target-feature -Xclang -aes"
+    end
+    set_cpu_cflags(map)
   end
 
   def m64
@@ -169,7 +172,7 @@ module Stdenv
   # Sets architecture-specific flags for every environment variable
   # given in the list `flags`.
   # @private
-  def set_cpu_flags(flags, map = Hardware::CPU.optimization_flags) # rubocop:disable Naming/AccessorMethodName
+  def set_cpu_flags(flags, map = Hardware::CPU.optimization_flags)
     cflags =~ /(-Xarch_#{Hardware::CPU.arch_32_bit} )-march=/
     xarch = Regexp.last_match(1).to_s
     remove flags, /(-Xarch_#{Hardware::CPU.arch_32_bit} )?-march=\S*/
@@ -184,16 +187,11 @@ module Stdenv
 
   # @private
   def set_cpu_cflags(map = Hardware::CPU.optimization_flags) # rubocop:disable Naming/AccessorMethodName
-    set_cpu_flags CC_FLAG_VARS, map
+    set_cpu_flags(CC_FLAG_VARS, map)
   end
 
   def make_jobs
-    # '-j' requires a positive integral argument
-    if (jobs = self["HOMEBREW_MAKE_JOBS"].to_i).positive?
-      jobs
-    else
-      Hardware::CPU.cores
-    end
+    Homebrew::EnvConfig.make_jobs.to_i
   end
 
   # This method does nothing in stdenv since there's no arg refurbishment

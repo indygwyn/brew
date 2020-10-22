@@ -1,7 +1,11 @@
+# typed: true
 # frozen_string_literal: true
 
 require "requirement"
 
+# A requirement on a specific architecture.
+#
+# @api private
 class ArchRequirement < Requirement
   fatal true
 

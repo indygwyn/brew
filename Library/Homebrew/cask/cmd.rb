@@ -1,13 +1,13 @@
+# typed: false
 # frozen_string_literal: true
 
 require "optparse"
 require "shellwords"
 
+require "cli/parser"
 require "extend/optparse"
 
 require "cask/config"
-
-require "cask/cmd/options"
 
 require "cask/cmd/abstract_command"
 require "cask/cmd/--cache"
@@ -17,6 +17,7 @@ require "cask/cmd/create"
 require "cask/cmd/doctor"
 require "cask/cmd/edit"
 require "cask/cmd/fetch"
+require "cask/cmd/help"
 require "cask/cmd/home"
 require "cask/cmd/info"
 require "cask/cmd/install"
@@ -33,13 +34,16 @@ require "cask/cmd/internal_help"
 require "cask/cmd/internal_stanza"
 
 module Cask
+  # Implementation of the `brew cask` command-line interface.
+  #
+  # @api private
   class Cmd
+    include Context
+
     ALIASES = {
       "ls"       => "list",
       "homepage" => "home",
-      "-S"       => "search",    # verb starting with "-" is questionable
-      "up"       => "update",
-      "instal"   => "install",   # gem does the same
+      "instal"   => "install", # gem does the same
       "uninstal" => "uninstall",
       "rm"       => "uninstall",
       "remove"   => "uninstall",
@@ -47,33 +51,54 @@ module Cask
       "dr"       => "doctor",
     }.freeze
 
-    include Options
+    DEPRECATED_COMMANDS = {
+      Cmd::Cache     => "brew --cache --cask",
+      Cmd::Doctor    => "brew doctor --verbose",
+      Cmd::Home      => "brew home",
+      Cmd::List      => "brew list --cask",
+      Cmd::Outdated  => "brew outdated --cask",
+      Cmd::Reinstall => "brew reinstall",
+      Cmd::Upgrade   => "brew upgrade --cask",
+    }.freeze
 
-    option "--appdir=PATH",               ->(value) { Config.global.appdir               = value }
-    option "--colorpickerdir=PATH",       ->(value) { Config.global.colorpickerdir       = value }
-    option "--prefpanedir=PATH",          ->(value) { Config.global.prefpanedir          = value }
-    option "--qlplugindir=PATH",          ->(value) { Config.global.qlplugindir          = value }
-    option "--dictionarydir=PATH",        ->(value) { Config.global.dictionarydir        = value }
-    option "--fontdir=PATH",              ->(value) { Config.global.fontdir              = value }
-    option "--servicedir=PATH",           ->(value) { Config.global.servicedir           = value }
-    option "--input_methoddir=PATH",      ->(value) { Config.global.input_methoddir      = value }
-    option "--internet_plugindir=PATH",   ->(value) { Config.global.internet_plugindir   = value }
-    option "--audio_unit_plugindir=PATH", ->(value) { Config.global.audio_unit_plugindir = value }
-    option "--vst_plugindir=PATH",        ->(value) { Config.global.vst_plugindir        = value }
-    option "--vst3_plugindir=PATH",       ->(value) { Config.global.vst3_plugindir       = value }
-    option "--screen_saverdir=PATH",      ->(value) { Config.global.screen_saverdir      = value }
+    def self.description
+      max_command_length = Cmd.commands.map(&:length).max
 
-    option "--help", :help, false
+      command_lines = Cmd.command_classes
+                         .select(&:visible?)
+                         .map do |klass|
+        "  - #{"`#{klass.command_name}`".ljust(max_command_length + 2)}  #{klass.short_description}\n"
+      end
 
-    # handled in OS::Mac
-    option "--language a,b,c", ->(*) {}
+      <<~EOS
+        Homebrew Cask provides a friendly CLI workflow for the administration of macOS applications distributed as binaries.
 
-    # override default handling of --version
-    option "--version", ->(*) { raise OptionParser::InvalidOption }
+        Commands:
+        #{command_lines.join}
+
+        See also: `man brew`
+      EOS
+    end
+
+    def self.parser(&block)
+      Homebrew::CLI::Parser.new do
+        if block_given?
+          instance_eval(&block)
+        else
+          usage_banner <<~EOS
+            `cask` <command> [<options>] [<cask>]
+
+            #{Cmd.description}
+          EOS
+        end
+
+        cask_options
+      end
+    end
 
     def self.command_classes
       @command_classes ||= constants.map(&method(:const_get))
-                                    .select { |klass| klass.respond_to?(:run) }
+                                    .select { |klass| klass.is_a?(Class) && klass < AbstractCommand }
                                     .reject(&:abstract?)
                                     .sort_by(&:command_name)
     end
@@ -85,38 +110,11 @@ module Cask
     def self.lookup_command(command_name)
       @lookup ||= Hash[commands.zip(command_classes)]
       command_name = ALIASES.fetch(command_name, command_name)
-      @lookup.fetch(command_name, command_name)
+      @lookup.fetch(command_name, nil)
     end
 
-    def self.run_command(command, *args)
-      return command.run(*args) if command.respond_to?(:run)
-
-      tap_cmd_directories = Tap.cmd_directories
-
-      path = PATH.new(tap_cmd_directories, ENV["HOMEBREW_PATH"])
-
-      external_ruby_cmd = tap_cmd_directories.map { |d| d/"brewcask-#{command}.rb" }
-                                             .find(&:file?)
-      external_ruby_cmd ||= which("brewcask-#{command}.rb", path)
-
-      if external_ruby_cmd
-        require external_ruby_cmd
-
-        klass = begin
-          const_get(command.to_s.capitalize.to_sym)
-        rescue NameError
-          # External command is a stand-alone Ruby script.
-          return
-        end
-
-        return klass.run(*args)
-      end
-
-      if external_command = which("brewcask-#{command}", path)
-        exec external_command, *ARGV[1..-1]
-      end
-
-      NullCommand.new(command, *args).run
+    def self.aliases
+      ALIASES
     end
 
     def self.run(*args)
@@ -124,137 +122,144 @@ module Cask
     end
 
     def initialize(*args)
-      @args = process_options(*args)
+      @argv = args
     end
 
-    def detect_command_and_arguments(*args)
-      command = args.find do |arg|
-        if self.class.commands.include?(arg)
-          true
-        else
-          break unless arg.start_with?("-")
+    def find_external_command(command)
+      @tap_cmd_directories ||= Tap.cmd_directories
+      @path ||= PATH.new(@tap_cmd_directories, ENV["HOMEBREW_PATH"])
+
+      external_ruby_cmd = @tap_cmd_directories.map { |d| d/"brewcask-#{command}.rb" }
+                                              .find(&:file?)
+      external_ruby_cmd ||= which("brewcask-#{command}.rb", @path)
+
+      if external_ruby_cmd
+        ExternalRubyCommand.new(command, external_ruby_cmd)
+      elsif external_command = which("brewcask-#{command}", @path)
+        ExternalCommand.new(external_command)
+      end
+    end
+
+    def detect_internal_command(*args)
+      args.each_with_index do |arg, i|
+        if command = self.class.lookup_command(arg)
+          args.delete_at(i)
+          return [command, args]
+        elsif !arg.start_with?("-")
+          break
         end
       end
 
-      if index = args.index(command)
-        args.delete_at(index)
+      nil
+    end
+
+    def detect_external_command(*args)
+      args.each_with_index do |arg, i|
+        if command = find_external_command(arg)
+          args.delete_at(i)
+          return [command, args]
+        elsif !arg.start_with?("-")
+          break
+        end
       end
 
-      [*command, *args]
+      nil
     end
 
     def run
-      command_name, *args = detect_command_and_arguments(*@args)
-      command = if help?
-        args.unshift(command_name) unless command_name.nil?
-        "help"
-      else
-        self.class.lookup_command(command_name)
-      end
+      argv = @argv
 
-      MacOS.full_version = ENV["MACOS_VERSION"] unless ENV["MACOS_VERSION"].nil?
+      args = self.class.parser.parse(argv, ignore_invalid_options: true)
 
       Tap.default_cask_tap.install unless Tap.default_cask_tap.installed?
-      self.class.run_command(command, *args)
-    rescue CaskError, MethodDeprecatedError, ArgumentError, OptionParser::InvalidOption => e
+
+      command, argv = detect_internal_command(*argv) ||
+                      detect_external_command(*argv) ||
+                      [args.remaining.empty? ? NullCommand : UnknownSubcommand.new(args.remaining.first), argv]
+
+      if (replacement = DEPRECATED_COMMANDS[command])
+        odeprecated "brew cask #{command.command_name}", replacement
+      end
+
+      if args.help?
+        puts command.help
+      else
+        command.run(*argv)
+      end
+    rescue CaskError, MethodDeprecatedError, ArgumentError => e
       onoe e.message
-      $stderr.puts e.backtrace if ARGV.debug?
-      exit 1
-    rescue StandardError, ScriptError, NoMemoryError => e
-      onoe e.message
-      $stderr.puts Utils.error_message_with_suggestions
-      $stderr.puts e.backtrace
+      $stderr.puts e.backtrace if args.debug?
       exit 1
     end
 
-    def self.nice_listing(cask_list)
-      cask_taps = {}
-      cask_list.each do |c|
-        user, repo, token = c.split "/"
-        repo.sub!(/^homebrew-/i, "")
-        cask_taps[token] ||= []
-        cask_taps[token].push "#{user}/#{repo}"
-      end
-      list = []
-      cask_taps.each do |token, taps|
-        if taps.length == 1
-          list.push token
-        else
-          taps.each { |r| list.push [r, token].join "/" }
-        end
-      end
-      list.sort
-    end
-
-    def process_options(*args)
-      exclude_regex = /^\-\-#{Regexp.union(*Config::DEFAULT_DIRS.keys.map(&Regexp.public_method(:escape)))}=/
-
-      all_args = Shellwords.shellsplit(ENV.fetch("HOMEBREW_CASK_OPTS", ""))
-                           .reject { |arg| arg.match?(exclude_regex) } + args
-
-      non_options = []
-
-      if idx = all_args.index("--")
-        non_options += all_args.drop(idx)
-        all_args = all_args.first(idx)
+    # Wrapper class for running an external Ruby command.
+    class ExternalRubyCommand
+      def initialize(command, path)
+        @command_name = command.to_s.capitalize.to_sym
+        @path = path
       end
 
-      remaining = all_args.select do |arg|
-        !process_arguments([arg]).empty?
-      rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::AmbiguousOption
-        true
-      end
-
-      remaining + non_options
-    end
-
-    class NullCommand
-      def initialize(command, *args)
-        @command = command
-        @args = args
-      end
-
-      def run(*)
-        purpose
-        usage
-
-        return if @command.nil?
-
-        if @command == "help"
-          return if @args.empty?
-
-          raise ArgumentError, "help does not take arguments." if @args.length
-        end
-
-        raise ArgumentError, "Unknown Cask command: #{@command}"
-      end
-
-      def purpose
-        puts <<~EOS
-          Homebrew Cask provides a friendly CLI workflow for the administration
-          of macOS applications distributed as binaries.
-
-        EOS
-      end
-
-      def usage
-        max_command_len = Cmd.commands.map(&:length).max
-
-        puts "Commands:\n\n"
-        Cmd.command_classes.each do |klass|
-          next unless klass.visible
-
-          puts "    #{klass.command_name.ljust(max_command_len)}  #{_help_for(klass)}"
-        end
-        puts %Q(\nSee also "man brew-cask")
+      def run(*args)
+        command_class&.run(*args)
       end
 
       def help
-        ""
+        command_class&.help
       end
 
-      def _help_for(klass)
-        klass.respond_to?(:help) ? klass.help : nil
+      private
+
+      def command_class
+        return @command_class if defined?(@command_class)
+
+        require @path
+
+        @command_class = begin
+          Cmd.const_get(@command_name)
+        rescue NameError
+          nil
+        end
+      end
+    end
+
+    # Wrapper class for running an external command.
+    class ExternalCommand
+      def initialize(path)
+        @path = path
+      end
+
+      def run(*argv)
+        exec @path, *argv
+      end
+
+      def help
+        exec @path, "--help"
+      end
+    end
+
+    # Helper class for showing help for unknown subcommands.
+    class UnknownSubcommand
+      def initialize(command_name)
+        @command_name = command_name
+      end
+
+      def run(*)
+        raise UsageError, "Subcommand `#{@command_name}` does not exist."
+      end
+
+      def help
+        run
+      end
+    end
+
+    # Helper class for showing help when no subcommand is given.
+    class NullCommand
+      def self.run(*)
+        raise UsageError, "No subcommand given."
+      end
+
+      def self.help
+        Cmd.parser.generate_help_text
       end
     end
   end

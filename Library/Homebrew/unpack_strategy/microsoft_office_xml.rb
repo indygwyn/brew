@@ -1,8 +1,10 @@
+# typed: true
 # frozen_string_literal: true
 
 require_relative "uncompressed"
 
 module UnpackStrategy
+  # Strategy for unpacking Microsoft Office documents.
   class MicrosoftOfficeXml < Uncompressed
     using Magic
 

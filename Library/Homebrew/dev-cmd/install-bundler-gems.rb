@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -13,7 +14,7 @@ module Homebrew
 
         Install Homebrew's Bundler gems.
       EOS
-      switch :debug
+
       max_named 0
     end
   end

@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula_versions"
@@ -11,9 +12,9 @@ require "cli/parser"
 module Homebrew
   module_function
 
-  def update_preinstall_header
+  def update_preinstall_header(args:)
     @update_preinstall_header ||= begin
-      ohai "Auto-updated Homebrew!" if ARGV.include?("--preinstall")
+      ohai "Auto-updated Homebrew!" if args.preinstall?
       true
     end
   end
@@ -27,16 +28,16 @@ module Homebrew
       EOS
       switch "--preinstall",
              description: "Run in 'auto-update' mode (faster, less output)."
-      switch :force
-      switch :quiet
-      switch :verbose
-      switch :debug
+      switch "-f", "--force",
+             description: "Treat installed and updated formulae as if they are from "\
+                          "the same taps and migrate them anyway."
+
       hide_from_man_page!
     end
   end
 
   def update_report
-    update_report_args.parse
+    args = update_report_args.parse
 
     if !Utils::Analytics.messages_displayed? &&
        !Utils::Analytics.disabled? &&
@@ -47,10 +48,11 @@ module Homebrew
       print "\a"
 
       # Use an extra newline and bold to avoid this being missed.
-      ohai "Homebrew has enabled anonymous aggregate formulae and cask analytics."
+      ohai "Homebrew has enabled anonymous aggregate formula and cask analytics."
       puts <<~EOS
         #{Tty.bold}Read the analytics documentation (and how to opt-out) here:
           #{Formatter.url("https://docs.brew.sh/Analytics")}#{Tty.reset}
+        No analytics have been recorded yet (or will be during this `brew` run).
 
       EOS
 
@@ -72,7 +74,6 @@ module Homebrew
 
     install_core_tap_if_necessary
 
-    hub = ReporterHub.new
     updated = false
 
     initial_revision = ENV["HOMEBREW_UPDATE_BEFORE"].to_s
@@ -80,10 +81,15 @@ module Homebrew
     odie "update-report should not be called directly!" if initial_revision.empty? || current_revision.empty?
 
     if initial_revision != current_revision
-      update_preinstall_header
+      update_preinstall_header args: args
       puts "Updated Homebrew from #{shorten_revision(initial_revision)} to #{shorten_revision(current_revision)}."
       updated = true
     end
+
+    Homebrew.failed = true if ENV["HOMEBREW_UPDATE_FAILED"]
+    return if ENV["HOMEBREW_DISABLE_LOAD_FORMULA"]
+
+    hub = ReporterHub.new
 
     updated_taps = []
     Tap.each do |tap|
@@ -92,42 +98,41 @@ module Homebrew
       begin
         reporter = Reporter.new(tap)
       rescue Reporter::ReporterRevisionUnsetError => e
-        onoe "#{e.message}\n#{e.backtrace.join "\n"}" if ARGV.homebrew_developer?
+        onoe "#{e.message}\n#{e.backtrace.join "\n"}" if Homebrew::EnvConfig.developer?
         next
       end
       if reporter.updated?
         updated_taps << tap.name
-        hub.add(reporter)
+        hub.add(reporter, preinstall: args.preinstall?)
       end
     end
 
     unless updated_taps.empty?
-      update_preinstall_header
+      update_preinstall_header args: args
       puts "Updated #{updated_taps.count} #{"tap".pluralize(updated_taps.count)} (#{updated_taps.to_sentence})."
       updated = true
     end
 
     if !updated
-      puts "Already up-to-date." if !ARGV.include?("--preinstall") && !ENV["HOMEBREW_UPDATE_FAILED"]
+      puts "Already up-to-date." if !args.preinstall? && !ENV["HOMEBREW_UPDATE_FAILED"]
     else
       if hub.empty?
         puts "No changes to formulae."
       else
-        hub.dump
+        hub.dump(updated_formula_report: !args.preinstall?)
         hub.reporters.each(&:migrate_tap_migration)
-        hub.reporters.each(&:migrate_formula_rename)
+        hub.reporters.each { |r| r.migrate_formula_rename(force: args.force?, verbose: args.verbose?) }
         CacheStoreDatabase.use(:descriptions) do |db|
           DescriptionCacheStore.new(db)
                                .update_from_report!(hub)
         end
       end
-      puts if ARGV.include?("--preinstall")
+      puts if args.preinstall?
     end
 
+    Commands.rebuild_commands_completion_list
     link_completions_manpages_and_docs
     Tap.each(&:link_completions_and_manpages)
-
-    Homebrew.failed = true if ENV["HOMEBREW_UPDATE_FAILED"]
   end
 
   def shorten_revision(revision)
@@ -180,7 +185,7 @@ class Reporter
     raise ReporterRevisionUnsetError, current_revision_var if @current_revision.empty?
   end
 
-  def report
+  def report(preinstall: false)
     return @report if @report
 
     @report = Hash.new { |h, k| h[k] = [] }
@@ -194,10 +199,16 @@ class Reporter
       next unless dst.extname == ".rb"
 
       if paths.any? { |p| tap.cask_file?(p) }
-        # Currently only need to handle Cask deletion/migration.
-        if status == "D"
+        case status
+        when "A"
+          # Have a dedicated report array for new casks.
+          @report[:AC] << tap.formula_file_to_name(src)
+        when "D"
           # Have a dedicated report array for deleted casks.
           @report[:DC] << tap.formula_file_to_name(src)
+        when "M"
+          # Report updated casks
+          @report[:MC] << tap.formula_file_to_name(src)
         end
       end
 
@@ -210,6 +221,14 @@ class Reporter
         new_tap = tap.tap_migrations[name]
         @report[status.to_sym] << full_name unless new_tap
       when "M"
+        name = tap.formula_file_to_name(src)
+
+        # Skip reporting updated formulae to speed up automatic updates.
+        if preinstall
+          @report[:M] << name
+          next
+        end
+
         begin
           formula = Formulary.factory(tap.path/src)
           new_version = formula.pkg_version
@@ -219,9 +238,10 @@ class Reporter
           # Don't care if the formula isn't available right now.
           nil
         rescue Exception => e # rubocop:disable Lint/RescueException
-          onoe "#{e.message}\n#{e.backtrace.join "\n"}" if ARGV.homebrew_developer?
+          onoe "#{e.message}\n#{e.backtrace.join "\n"}" if Homebrew::EnvConfig.developer?
         end
-        @report[:M] << tap.formula_file_to_name(src)
+
+        @report[:M] << name
       when /^R\d{0,3}/
         src_full_name = tap.formula_file_to_name(src)
         dst_full_name = tap.formula_file_to_name(dst)
@@ -239,10 +259,10 @@ class Reporter
       new_name = tap.formula_renames[old_name]
       next unless new_name
 
-      if tap.core_tap?
-        new_full_name = new_name
+      new_full_name = if tap.core_tap?
+        new_name
       else
-        new_full_name = "#{tap}/#{new_name}"
+        "#{tap}/#{new_name}"
       end
 
       renamed_formulae << [old_full_name, new_full_name] if @report[:A].include? new_full_name
@@ -253,10 +273,10 @@ class Reporter
       old_name = tap.formula_renames.key(new_name)
       next unless old_name
 
-      if tap.core_tap?
-        old_full_name = old_name
+      old_full_name = if tap.core_tap?
+        old_name
       else
-        old_full_name = "#{tap}/#{old_name}"
+        "#{tap}/#{old_name}"
       end
 
       renamed_formulae << [old_full_name, new_full_name]
@@ -310,7 +330,7 @@ class Reporter
             system HOMEBREW_BREW_FILE, "link", new_full_name, "--overwrite"
           end
         rescue Exception => e # rubocop:disable Lint/RescueException
-          onoe "#{e.message}\n#{e.backtrace.join "\n"}" if ARGV.homebrew_developer?
+          onoe "#{e.message}\n#{e.backtrace.join "\n"}" if Homebrew::EnvConfig.developer?
         end
         next
       end
@@ -354,7 +374,7 @@ class Reporter
     end
   end
 
-  def migrate_formula_rename
+  def migrate_formula_rename(force:, verbose:)
     Formula.installed.each do |formula|
       next unless Migrator.needs_migration?(formula)
 
@@ -374,11 +394,11 @@ class Reporter
       begin
         f = Formulary.factory(new_full_name)
       rescue Exception => e # rubocop:disable Lint/RescueException
-        onoe "#{e.message}\n#{e.backtrace.join "\n"}" if ARGV.homebrew_developer?
+        onoe "#{e.message}\n#{e.backtrace.join "\n"}" if Homebrew::EnvConfig.developer?
         next
       end
 
-      Migrator.migrate_if_needed(f)
+      Migrator.migrate_if_needed(f, force: force)
     end
   end
 
@@ -406,37 +426,63 @@ class ReporterHub
     @hash.fetch(key, [])
   end
 
-  def add(reporter)
+  def add(reporter, preinstall: false)
     @reporters << reporter
-    report = reporter.report.delete_if { |_k, v| v.empty? }
+    report = reporter.report(preinstall: preinstall).delete_if { |_k, v| v.empty? }
     @hash.update(report) { |_key, oldval, newval| oldval.concat(newval) }
   end
 
   delegate empty?: :@hash
 
-  def dump
+  def dump(updated_formula_report: true)
     # Key Legend: Added (A), Copied (C), Deleted (D), Modified (M), Renamed (R)
 
     dump_formula_report :A, "New Formulae"
-    dump_formula_report :M, "Updated Formulae"
+    if updated_formula_report
+      dump_formula_report :M, "Updated Formulae"
+    else
+      updated = select_formula(:M).count
+      if updated.positive?
+        ohai "Updated Formulae"
+        puts "Updated #{updated} #{"formula".pluralize(updated)}."
+      end
+    end
     dump_formula_report :R, "Renamed Formulae"
     dump_formula_report :D, "Deleted Formulae"
+    dump_formula_report :AC, "New Casks"
+    dump_formula_report :MC, "Updated Casks"
+    dump_formula_report :DC, "Deleted Casks"
   end
 
   private
 
   def dump_formula_report(key, title)
+    only_installed = Homebrew::EnvConfig.update_report_only_installed?
+
     formulae = select_formula(key).sort.map do |name, new_name|
       # Format list items of renamed formulae
       case key
       when :R
         name = pretty_installed(name) if installed?(name)
         new_name = pretty_installed(new_name) if installed?(new_name)
-        "#{name} -> #{new_name}"
+        "#{name} -> #{new_name}" unless only_installed
       when :A
-        name unless installed?(name)
+        name if !installed?(name) && !only_installed
+      when :AC
+        name.split("/").last if !cask_installed?(name) && !only_installed
+      when :MC, :DC
+        name = name.split("/").last
+        if cask_installed?(name)
+          pretty_installed(name)
+        elsif !only_installed
+          name
+        end
       else
-        installed?(name) ? pretty_installed(name) : name
+        if installed?(name)
+          pretty_installed(name)
+        elsif !only_installed
+          name
+        end
       end
     end.compact
 
@@ -449,5 +495,9 @@ class ReporterHub
 
   def installed?(formula)
     (HOMEBREW_CELLAR/formula.split("/").last).directory?
+  end
+
+  def cask_installed?(cask)
+    (Cask::Caskroom.path/cask).directory?
   end
 end

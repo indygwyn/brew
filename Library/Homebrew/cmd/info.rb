@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "missing_formula"
@@ -8,6 +9,8 @@ require "formula"
 require "keg"
 require "tab"
 require "json"
+require "utils/spdx"
+require "deprecate_disable"
 
 module Homebrew
   module_function
@@ -29,11 +32,11 @@ module Homebrew
              description: "List global Homebrew analytics data or, if specified, installation and "\
                           "build error data for <formula> (provided neither `HOMEBREW_NO_ANALYTICS` "\
                           "nor `HOMEBREW_NO_GITHUB_API` are set)."
-      flag   "--days",
+      flag   "--days=",
              depends_on:  "--analytics",
              description: "How many days of analytics data to retrieve. "\
                           "The value for <days> must be `30`, `90` or `365`. The default is `30`."
-      flag   "--category",
+      flag   "--category=",
              depends_on:  "--analytics",
              description: "Which type of analytics data to retrieve. "\
                           "The value for <category> must be `install`, `install-on-request` or `build-error`; "\
@@ -52,22 +55,22 @@ module Homebrew
       switch "--all",
              depends_on:  "--json",
              description: "Print JSON of all available formulae."
-      switch :verbose,
+      switch "-v", "--verbose",
              description: "Show more verbose analytics data for <formula>."
-      switch :debug
+
       conflicts "--installed", "--all"
     end
   end
 
   def info
-    info_args.parse
+    args = info_args.parse
 
-    if args.days.present?
-      raise UsageError, "--days must be one of #{VALID_DAYS.join(", ")}" unless VALID_DAYS.include?(args.days)
+    if args.days.present? && !VALID_DAYS.include?(args.days)
+      raise UsageError, "--days must be one of #{VALID_DAYS.join(", ")}"
     end
 
     if args.category.present?
-      if Homebrew.args.named.present? && !VALID_FORMULA_CATEGORIES.include?(args.category)
+      if args.named.present? && !VALID_FORMULA_CATEGORIES.include?(args.category)
         raise UsageError, "--category must be one of #{VALID_FORMULA_CATEGORIES.join(", ")} when querying formulae"
       end
 
@@ -77,46 +80,40 @@ module Homebrew
     end
 
     if args.json
-      raise UsageError, "Invalid JSON version: #{args.json}" unless ["v1", true].include? args.json
-      if !(args.all? || args.installed?) && Homebrew.args.named.blank?
-        raise UsageError, "This command's option requires a formula argument"
-      end
+      raise UsageError, "invalid JSON version: #{args.json}" unless ["v1", true].include? args.json
+      raise FormulaUnspecifiedError if !(args.all? || args.installed?) && args.no_named?
 
-      print_json
+      print_json(args: args)
     elsif args.github?
-      raise UsageError, "This command's option requires a formula argument" if Homebrew.args.named.blank?
+      raise FormulaUnspecifiedError if args.no_named?
 
-      exec_browser(*Homebrew.args.formulae.map { |f| github_info(f) })
+      exec_browser(*args.named.to_formulae_and_casks.map { |f| github_info(f) })
     else
-      print_info
+      print_info(args: args)
     end
   end
 
-  def print_info
-    if Homebrew.args.named.blank?
+  def print_info(args:)
+    if args.no_named?
       if args.analytics?
-        Utils::Analytics.output
+        Utils::Analytics.output(args: args)
       elsif HOMEBREW_CELLAR.exist?
         count = Formula.racks.length
         puts "#{count} #{"keg".pluralize(count)}, #{HOMEBREW_CELLAR.dup.abv}"
       end
     else
-      Homebrew.args.named.each_with_index do |f, i|
+      args.named.each_with_index do |f, i|
         puts unless i.zero?
         begin
-          formula = if f.include?("/") || File.exist?(f)
-            Formulary.factory(f)
-          else
-            Formulary.find_with_priority(f)
-          end
+          formula = Formulary.factory(f)
           if args.analytics?
-            Utils::Analytics.formula_output(formula)
+            Utils::Analytics.formula_output(formula, args: args)
           else
-            info_formula(formula)
+            info_formula(formula, args: args)
           end
         rescue FormulaUnavailableError => e
           if args.analytics?
-            Utils::Analytics.output(filter: f)
+            Utils::Analytics.output(filter: f, args: args)
             next
           end
           ofail e.message
@@ -129,13 +126,13 @@ module Homebrew
     end
   end
 
-  def print_json
+  def print_json(args:)
     ff = if args.all?
       Formula.sort
     elsif args.installed?
       Formula.installed.sort
     else
-      Homebrew.args.formulae
+      args.named.to_formulae
     end
     json = ff.map(&:to_hash)
     puts JSON.generate(json)
@@ -143,7 +140,7 @@ module Homebrew
 
   def github_remote_path(remote, path)
     if remote =~ %r{^(?:https?://|git(?:@|://))github\.com[:/](.+)/(.+?)(?:\.git)?$}
-      "https://github.com/#{Regexp.last_match(1)}/#{Regexp.last_match(2)}/blob/master/#{path}"
+      "https://github.com/#{Regexp.last_match(1)}/#{Regexp.last_match(2)}/blob/HEAD/#{path}"
     else
       "#{remote}/#{path}"
     end
@@ -152,7 +149,11 @@ module Homebrew
   def github_info(f)
     if f.tap
       if remote = f.tap.remote
-        path = f.path.relative_path_from(f.tap.path)
+        path = if f.class.superclass == Formula
+          f.path.relative_path_from(f.tap.path)
+        elsif f.is_a?(Cask::Cask)
+          f.sourcefile_path.relative_path_from(f.tap.path)
+        end
         github_remote_path(remote, path)
       else
         f.path
@@ -162,17 +163,13 @@ module Homebrew
     end
   end
 
-  def info_formula(f)
+  def info_formula(f, args:)
     specs = []
 
     if stable = f.stable
       s = "stable #{stable.version}"
       s += " (bottled)" if stable.bottled?
       specs << s
-    end
-
-    if devel = f.devel
-      specs << "devel #{devel.version}"
     end
 
     specs << "HEAD" if f.head
@@ -184,6 +181,15 @@ module Homebrew
     puts "#{f.full_name}: #{specs * ", "}#{" [#{attrs * ", "}]" unless attrs.empty?}"
     puts f.desc if f.desc
     puts Formatter.url(f.homepage) if f.homepage
+
+    deprecate_disable_type, deprecate_disable_reason = DeprecateDisable.deprecate_disable_info f
+    if deprecate_disable_type.present?
+      if deprecate_disable_reason.present?
+        puts "#{deprecate_disable_type.capitalize} because it #{deprecate_disable_reason}!"
+      else
+        puts "#{deprecate_disable_type.capitalize}!"
+      end
+    end
 
     conflicts = f.conflicts.map do |c|
       reason = " (because #{c.reason})" if c.reason
@@ -214,6 +220,8 @@ module Homebrew
 
     puts "From: #{Formatter.url(github_info(f))}"
 
+    puts "License: #{SPDX.license_expression_to_string f.license}" if f.license.present?
+
     unless f.deps.empty?
       ohai "Dependencies"
       %w[build required recommended optional].map do |type|
@@ -232,15 +240,15 @@ module Homebrew
       end
     end
 
-    if !f.options.empty? || f.head || f.devel
+    if !f.options.empty? || f.head
       ohai "Options"
-      Homebrew.dump_options_for_formula f
+      Options.dump_for_formula f
     end
 
     caveats = Caveats.new(f)
     ohai "Caveats", caveats.to_s unless caveats.empty?
 
-    Utils::Analytics.formula_output(f)
+    Utils::Analytics.formula_output(f, args: args)
   end
 
   def decorate_dependencies(dependencies)

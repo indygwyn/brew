@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -14,17 +15,15 @@ module Homebrew
         Unpin <formula>, allowing them to be upgraded by `brew upgrade` <formula>.
         See also `pin`.
       EOS
-      switch :verbose
-      switch :debug
+
+      min_named :formula
     end
   end
 
   def unpin
-    unpin_args.parse
+    args = unpin_args.parse
 
-    raise FormulaUnspecifiedError if args.remaining.empty?
-
-    Homebrew.args.resolved_formulae.each do |f|
+    args.named.to_resolved_formulae.each do |f|
       if f.pinned?
         f.unpin
       elsif !f.pinnable?

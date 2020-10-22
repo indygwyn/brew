@@ -181,7 +181,11 @@ function __fish_brew_suggest_taps_pinned -d "List only pinned taps"
 end
 
 function __fish_brew_suggest_commands -d "Lists all commands names, including aliases"
-    brew commands --quiet --include-aliases
+    if test -f (brew --cache)/all_commands_list.txt
+        cat (brew --cache)/all_commands_list.txt | \grep -v instal\$
+    else
+        cat (brew --repo)/completions/internal_commands_list.txt | \grep -v instal\$
+    end
 end
 
 # TODO: any better way to list available services?
@@ -194,7 +198,7 @@ function __fish_brew_suggest_services -d "Lists available services"
 end
 
 function __fish_brew_suggest_casks_installed -d "Lists installed casks"
-    brew cask list -1
+    brew list --cask -1
 end
 
 function __fish_brew_suggest_casks_outdated -d "Lists outdated casks with the information about potential upgrade"
@@ -204,7 +208,7 @@ function __fish_brew_suggest_casks_outdated -d "Lists outdated casks with the in
 end
 
 function __fish_brew_suggest_casks_all -d "Lists locally available casks"
-    brew search --casks
+    brew search --cask
 end
 
 
@@ -442,6 +446,20 @@ __fish_brew_complete_arg 'list ls;
     ' -l multiple -d "Only show formulae with multiple versions"
 
 
+__fish_brew_complete_cmd 'livecheck' "Check for newer versions of formulae from upstream"
+__fish_brew_complete_arg 'livecheck' -a '(__fish_brew_suggest_formulae_all)'
+__fish_brew_complete_arg 'livecheck'      -l full-name   -d "Print formulae with fully-qualified name"
+__fish_brew_complete_arg 'livecheck'      -l tap         -d "Check the formulae within the given tap, specified as user/repo"
+__fish_brew_complete_arg 'livecheck'      -l all         -d "Check all available formulae"
+__fish_brew_complete_arg 'livecheck'      -l installed   -d "Check formulae that are currently installed"
+__fish_brew_complete_arg 'livecheck'      -l newer-only  -d "Show the latest version only if it's newer than the formula"
+__fish_brew_complete_arg 'livecheck'      -l json        -d "Output information in JSON format"
+__fish_brew_complete_arg 'livecheck' -s q -l quiet       -d "Suppress warnings, don't print a progress bar for JSON output"
+__fish_brew_complete_arg 'livecheck' -s d -l debug       -d "Display any debugging information"
+__fish_brew_complete_arg 'livecheck' -s v -l verbose     -d "Make some output more verbose"
+__fish_brew_complete_arg 'livecheck' -s h -l help        -d "Show the help message"
+
+
 __fish_brew_complete_cmd 'log' "Show git log for formula"
 __fish_brew_complete_arg 'log' -a '(__fish_brew_suggest_formulae_all)'
 
@@ -526,14 +544,6 @@ __fish_brew_complete_cmd 'tap-info' "Display a brief summary of all installed ta
 __fish_brew_complete_arg 'tap-info; and not __fish_brew_opt --installed' -a '(__fish_brew_suggest_taps_installed)'
 __fish_brew_complete_arg 'tap-info; and not __fish_brew_opt --installed' -l installed -d "Display information on all installed taps"
 __fish_brew_complete_arg 'tap-info; and not __fish_brew_opt --json=v1'   -l json=v1   -d "Format output in JSON format"
-
-
-__fish_brew_complete_cmd 'tap-pin' "Prioritize tap's formulae over core"
-__fish_brew_complete_arg 'tap-pin' -a '(__fish_brew_suggest_taps_installed)'
-
-
-__fish_brew_complete_cmd 'tap-unpin' "Don't prioritize tap's formulae over core anymore"
-__fish_brew_complete_arg 'tap-unpin' -a '(__fish_brew_suggest_taps_pinned)'
 
 
 __fish_brew_complete_cmd 'uninstall' "Uninstall formula"

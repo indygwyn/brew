@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require_relative "shared_examples/requires_cask_token"
@@ -29,6 +30,50 @@ describe Cask::Cmd::Install, :cask do
     expect(transmission.config.appdir.join("Transmission.app")).to be_a_directory
     expect(caffeine).to be_installed
     expect(caffeine.config.appdir.join("Caffeine.app")).to be_a_directory
+  end
+
+  it "recognizes the --appdir flag" do
+    appdir = mktmpdir
+
+    expect(Cask::CaskLoader).to receive(:load).with("local-caffeine", any_args)
+      .and_wrap_original { |f, *args|
+        caffeine = f.call(*args)
+        expect(caffeine.config.appdir).to eq appdir
+        caffeine
+      }
+
+    described_class.run("local-caffeine", "--appdir=#{appdir}")
+  end
+
+  it "recognizes the --appdir flag from HOMEBREW_CASK_OPTS" do
+    appdir = mktmpdir
+
+    expect(Cask::CaskLoader).to receive(:load).with("local-caffeine", any_args)
+      .and_wrap_original { |f, *args|
+        caffeine = f.call(*args)
+        expect(caffeine.config.appdir).to eq appdir
+        caffeine
+      }
+
+    ENV["HOMEBREW_CASK_OPTS"] = "--appdir=#{appdir}"
+
+    described_class.run("local-caffeine")
+  end
+
+  it "prefers an explicit --appdir flag to one from HOMEBREW_CASK_OPTS" do
+    global_appdir = mktmpdir
+    appdir = mktmpdir
+
+    expect(Cask::CaskLoader).to receive(:load).with("local-caffeine", any_args)
+      .and_wrap_original { |f, *args|
+        caffeine = f.call(*args)
+        expect(caffeine.config.appdir).to eq appdir
+        caffeine
+      }
+
+    ENV["HOMEBREW_CASK_OPTS"] = "--appdir=#{global_appdir}"
+
+    described_class.run("local-caffeine", "--appdir=#{appdir}")
   end
 
   it "skips double install (without nuking existing installation)" do

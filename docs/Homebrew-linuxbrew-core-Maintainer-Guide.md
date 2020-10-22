@@ -73,8 +73,8 @@ changes that the upstream Homebrew developers have made.
 brew merge-homebrew --core
 ```
 
-Merging all the changes from upstream in one go is usually
-undesirable since our build servers will time out. Instead, attempt
+Merging all the changes from upstream in one go can make it
+harder to keep track of all the active builds. Instead, attempt
 to only merge 8-10 modified formulae.
 
 `git log --oneline master..homebrew/master` will show a list of all
@@ -85,12 +85,8 @@ including bottles). Once you're satisfied with the list of updated
 formulae, begin the merge:
 
 ```bash
-brew merge-homebrew --core --skip-style <sha>
+brew merge-homebrew --core <sha>
 ```
-
-The `--skip-style` argument skips running `brew style`, which saves
-time and in some cases avoids errors. The style errors can be fixed in
-bottle PRs later in the process when CI flags them.
 
 #### Simple Conflicts
 
@@ -198,33 +194,34 @@ Conflicts:
 
 The `merge-homebrew` command will create a pull-request for you, using `hub`.
 
-It is expected that CI checks on the merge commit of the PR will fail.
-This is due to a bug with Azure Pipelines and its handling of merge
-commits. Master branch builds also fail for the same reason. This is
-OK.
-
-Once the PR is approved by other Homebrew developers, you can finalise
-the merge with:
+Continuous integration verifies that the pull request passes
+`brew readall` and `brew style`, which only takes a few minutes.
+Finalise the merge with:
 
 ```bash
-brew pull --clean <PR-NUMBER>
 git push origin master
 ```
 
-The merge is now complete. Don't forget to update your GitHub fork by
-running `git push your-fork master`
+If the above command fails (e.g. another maintainer pushed changes to
+Homebrew/linuxbrew-core before you finished the merge),
+you can update your branch with `git rebase --rebase-merges`,
+but it's often easier to just run `git reset --hard origin/master`
+and redo `brew merge-homebrew --core`.
+
+Otherwise, the merge is now complete. Don't forget to update your GitHub
+fork by running `git push your-fork master`.
 
 ## Building bottles for updated formulae
 
 After merging changes, we must rebuild bottles for all the PRs that
-had conflicts.
-
-To do this, tap `Homebrew/homebrew-linux-dev` and run the following
+had conflicts. There is an automatic workflow job that handles this
+when the merge commit is pushed to the repository; however, to do it
+manually, tap `Homebrew/homebrew-linux-dev` and run the following
 command where the merge commit is `HEAD`:
 
 ```sh
 for formula in $(brew find-formulae-to-bottle); do
-  brew build-bottle-pr --remote=$HOMEBREW_GITHUB_USER $formula
+  brew request-bottle $formula
 done
 ```
 
@@ -244,69 +241,31 @@ error; by default, this script won't output the errors. To see them,
 run `brew find-formulae-to-bottle --verbose` separate to the `for`
 loop above.
 
-The `build-bottle-pr` script creates a branch called `bottle-<FORMULA>`, adds `# Build a bottle
-for Linux` to the top of the formula, pushes the branch to GitHub
-at the specified remote (default: `origin`), and opens a pull request using `hub
-pull-request`.
+The `request-bottle` script kicks off a GitHub Action to build the
+bottle. If successful, it pushes the bottle to BinTray and a commit
+with the SHA to `master`. There are no pull requests, and no manual
+steps unless the formula fails to build. Check that the build was
+successful from the [Actions tab](https://github.com/homebrew/linuxbrew-core/actions).
 
-## Pulling bottles
-
-Pull requests are either raised by maintainers or users. In both
-cases, how to merge them depends on whether or not a Linux bottle has
-been built for the formula.
-
-We very rarely use the GitHub UI buttons. Instead, we "pull the
-bottle". This means that the PR shows up as "closed" to the user, but
-they still get authorship credit. This is done with the following
-command:
-
-```bash
-HOMEBREW_BOTTLE_DOMAIN=https://linuxbrew.bintray.com brew pull --bottle --bintray-org=linuxbrew --test-bot-user=LinuxbrewTestBot <PR-NUMBER>
-```
-
-It saves a lot of time to alias this in your shell config. One
-possible alias is `lbrew-pull-bottle`.
-
-For PRs with the title "Build a bottle for Linux" and that have
-only one commit with contents "# Build a bottle for Linux", these
-have been created with `brew build-bottle-pr` and the commit from the
-PR doesn't need preserving. We don't want to litter the codebase with
-comments. In these cases, you can combine `brew pull --bottle` with
-`brew squash-bottle-pr` (in the Homebrew/linux-dev tap). This will
-squash the first commit message, leaving just the commit with the
-bottle SHA authored by `LinuxbrewTestBot`. It will still close the PR,
-as `brew pull --bottle` adds `Closes` and `Signed-off-by` to the
-commit message body.
-
-```bash
-lbrew-pull-bottle <PR-NUMBER> && brew squash-bottle-pr
-```
-
-For PRs where there have been force pushes or extra commits to fix the
-build or fix bottling syntax, we can't `brew squash-bottle-pr` as we
-must keep the fixes. If the `# Build a bottle for Linux` line
-still exists in the formula, remove it.
-
-The `brew pull` command *publishes* the bottle to BinTray and verifies
-that the SHA in the formula and the SHA of the downloaded file match.
-To verify a bottle, the script downloads the bottle from BinTray - if
-you're on an unstable connection, this may take a while or even time
-out. Publishing the bottle means that it's available as the latest
-version for users to download, so remember to push your commits to
-`origin`.
-
-If something goes wrong with the bottle pull and you don't want to
-publish the bottle and push the commit, `git reset --hard
-origin/master` and login to BinTray and delete the new bottle (there's
-a list of who published what recently).
-
-Once you've pushed to `origin`, there's no going back: you're a
-maintainer now, you can't force-push to fix your mistakes!
+If the formula fails to build, we open a pull request with the fix,
+which will build (but not publish) bottles for that formula. Once the
+formula builds correctly, we merge that pull request from the GitHub
+web interface, which starts a workflow job to publish the bottle and
+push a bottle commit to Homebrew/linuxbrew-core.
 
 ## Creating new Linux-specific formula
 
-Make a PR to `Homebrew/linuxbrew-core` containing one commit named like this: `name (new formula)`. Keep only one commit in this PR, squash and force push to your branch if needed. Include a comment: `# tag "linux"` in the formula after the `url` stanza, so maintainers can easily find Linux only formulae.
-For `brew pull` to be successful when new formulae are added, we have to insert an empty bottle block into the formula code. This usually goes after the `linux` tag.
+Make a PR to `Homebrew/linuxbrew-core` containing one commit named
+like this: `name (new formula)`. Keep only one commit in this PR,
+squash and force push to your branch if needed. Include the line
+`depends_on :linux` in the dependencies section, so that maintainers
+can easily find Linux-only formulae.
+
+For the bottle commit to be successful when new formulae are added, we
+have to insert an empty bottle block into the formula code. This
+usually goes after the `url` and `sha256` lines, with a blank line in
+between.
+
 ```ruby
 bottle do
 end
@@ -383,18 +342,18 @@ correct repository:
 
 > Thanks for your PR.
 >
-> However, this formula is not Linux-specific. Its new versions are merged from the [Homebrew/homebrew-core](https://github.com/Homebrew/homebrew-core) repository daily [as documented in CONTRIBUTING.md](https://github.com/Homebrew/linuxbrew-core/blob/master/CONTRIBUTING.md). Please submit this change as a PR to that repository.
+> However, this formula is not Linux-specific. Its new versions are merged from the [Homebrew/homebrew-core](https://github.com/Homebrew/homebrew-core) repository daily [as documented in CONTRIBUTING.md](https://github.com/Homebrew/linuxbrew-core/blob/HEAD/CONTRIBUTING.md). Please submit this change as a PR to that repository.
 >
 > We look forward to your PR against Homebrew/homebrew-core for the next version bump!
 
 ### Linux-only formulae
 
 If the formula is a Linux-only formula, it either:
-- will contain the line `# tag "linux"`
+- will contain the line `depends_on :linux`
 - won't have macOS bottles
 
-These formulae are fine for users to bump with `brew bump-formula-pr`,
-but you should request that they remove the existing `x86_64_linux`
+If the user hasn't used `brew bump-formula-pr`, or is submitting
+another change, you should request that they remove the `x86_64_linux`
 bottle SHA line so that CI will build a bottle for the new version
 correctly. If the bottle SHA isn't removed, CI will fail with the
 following error:

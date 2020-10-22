@@ -1,6 +1,8 @@
+# typed: true
 # frozen_string_literal: true
 
 module OS
+  # Helper module for querying system information on Linux.
   module Linux
     module_function
 
@@ -21,13 +23,13 @@ module OS
     end
   end
 
-  # Define OS::Mac on Linux for formula API compatibility.
+  # rubocop:disable Style/Documentation
   module Mac
     module_function
 
     # rubocop:disable Naming/ConstantName
     # rubocop:disable Style/MutableConstant
-    ::MacOS = self
+    ::MacOS = OS::Mac
     # rubocop:enable Naming/ConstantName
     # rubocop:enable Style/MutableConstant
 
@@ -42,15 +44,23 @@ module OS
     end
 
     def languages
-      @languages ||= [
-        *ARGV.value("language")&.split(","),
-        *ENV["HOMEBREW_LANGUAGES"]&.split(","),
-        *ENV["LANG"]&.slice(/[a-z]+/),
-      ].uniq
+      @languages ||= Array(ENV["LANG"]&.slice(/[a-z]+/)).uniq
     end
 
     def language
       languages.first
+    end
+
+    def sdk_root_needed?
+      false
+    end
+
+    def sdk_path_if_needed(_v = nil)
+      nil
+    end
+
+    def sdk_path
+      nil
     end
 
     module Xcode
@@ -59,6 +69,23 @@ module OS
       def version
         Version::NULL
       end
+
+      def installed?
+        false
+      end
+    end
+
+    module CLT
+      module_function
+
+      def version
+        Version::NULL
+      end
+
+      def installed?
+        false
+      end
     end
   end
+  # rubocop:enable Style/Documentation
 end

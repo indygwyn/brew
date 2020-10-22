@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 describe Cask::Installer, :cask do
@@ -195,7 +196,7 @@ describe Cask::Installer, :cask do
 
       described_class.new(nested_app).install
 
-      expect(Cask::Config.global.appdir.join("MyNestedApp.app")).to be_a_directory
+      expect(nested_app.config.appdir.join("MyNestedApp.app")).to be_a_directory
     end
 
     it "generates and finds a timestamped metadata directory for an installed Cask" do
@@ -233,7 +234,7 @@ describe Cask::Installer, :cask do
 
     it "uninstalls all versions if force is set" do
       caffeine = Cask::CaskLoader.load(cask_path("local-caffeine"))
-      mutated_version = caffeine.version + ".1"
+      mutated_version = "#{caffeine.version}.1"
 
       described_class.new(caffeine).install
 

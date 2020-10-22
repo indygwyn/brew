@@ -1,8 +1,10 @@
+# typed: true
 # frozen_string_literal: true
 
 require_relative "directory"
 
 module UnpackStrategy
+  # Strategy for unpacking Bazaar archives.
   class Bazaar < Directory
     using Magic
 

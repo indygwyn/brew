@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 describe Tap do
@@ -168,7 +169,7 @@ describe Tap do
 
     it "returns nil if Git is not available" do
       setup_git_repo
-      allow(Utils).to receive(:git_available?).and_return(false)
+      allow(Utils::Git).to receive(:available?).and_return(false)
       expect(subject.remote).to be nil
     end
   end
@@ -207,18 +208,11 @@ describe Tap do
     it "raises an error when the remote doesn't match" do
       setup_git_repo
       already_tapped_tap = described_class.new("Homebrew", "foo")
-      touch subject.path/".git/shallow"
       expect(already_tapped_tap).to be_installed
       wrong_remote = "#{subject.remote}-oops"
       expect {
-        already_tapped_tap.install clone_target: wrong_remote, full_clone: true
+        already_tapped_tap.install clone_target: wrong_remote
       }.to raise_error(TapRemoteMismatchError)
-    end
-
-    it "raises an error when the Tap is already unshallow" do
-      setup_git_repo
-      already_tapped_tap = described_class.new("Homebrew", "foo")
-      expect { already_tapped_tap.install full_clone: true }.to raise_error(TapAlreadyUnshallowError)
     end
 
     describe "force_auto_update" do
@@ -309,16 +303,6 @@ describe Tap do
   ensure
     (HOMEBREW_PREFIX/"etc").rmtree if (HOMEBREW_PREFIX/"etc").exist?
     (HOMEBREW_PREFIX/"share").rmtree if (HOMEBREW_PREFIX/"share").exist?
-  end
-
-  specify "#pin and #unpin" do
-    expect(subject).not_to be_pinned
-    expect { subject.unpin }.to raise_error(TapPinStatusError)
-    subject.pin
-    expect(subject).to be_pinned
-    expect { subject.pin }.to raise_error(TapPinStatusError)
-    subject.unpin
-    expect(subject).not_to be_pinned
   end
 
   specify "#config" do

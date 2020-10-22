@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
@@ -20,25 +21,32 @@ module Homebrew
              description: "Also print diffstat from commit."
       switch "--oneline",
              description: "Print only one line per commit."
-      flag   "-1", "--max-count",
-             description: "Print only one or a specified number of commits."
+      switch "-1",
+             description: "Print only one commit."
+      flag   "-n", "--max-count=",
+             description: "Print only a specified number of commits."
       max_named 1
+      conflicts "-1", "--max-count"
     end
   end
 
   def log
-    log_args.parse
+    args = log_args.parse
 
-    if ARGV.named.empty?
-      git_log HOMEBREW_REPOSITORY
+    # As this command is simplifying user-run commands then let's just use a
+    # user path, too.
+    ENV["PATH"] = ENV["HOMEBREW_PATH"]
+
+    if args.no_named?
+      git_log HOMEBREW_REPOSITORY, args: args
     else
-      path = Formulary.path(ARGV.named.first)
+      path = Formulary.path(args.named.first)
       tap = Tap.from_path(path)
-      git_log path.dirname, path, tap
+      git_log path.dirname, path, tap, args: args
     end
   end
 
-  def git_log(cd_dir, path = nil, tap = nil)
+  def git_log(cd_dir, path = nil, tap = nil, args:)
     cd cd_dir
     repo = Utils.popen_read("git rev-parse --show-toplevel").chomp
     if tap
@@ -58,8 +66,14 @@ module Homebrew
           git -C "#{git_cd}" fetch --unshallow
       EOS
     end
-    args = Homebrew.args.options_only
-    args += ["--follow", "--", path] unless path.nil?
-    system "git", "log", *args
+
+    git_args = []
+    git_args << "--patch" if args.patch?
+    git_args << "--stat" if args.stat?
+    git_args << "--oneline" if args.oneline?
+    git_args << "-1" if args.public_send(:'1?')
+    git_args << "--max-count" << args.max_count if args.max_count
+    git_args += ["--follow", "--", path] if path.present?
+    system "git", "log", *git_args
   end
 end

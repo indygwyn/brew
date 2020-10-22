@@ -1,6 +1,8 @@
+# typed: true
 # frozen_string_literal: true
 
 module UnpackStrategy
+  # Strategy for unpacking gzip archives.
   class Gzip
     include UnpackStrategy
 

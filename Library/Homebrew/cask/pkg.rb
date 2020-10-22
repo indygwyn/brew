@@ -1,8 +1,12 @@
+# typed: true
 # frozen_string_literal: true
 
 require "cask/macos"
 
 module Cask
+  # Helper class for uninstalling `.pkg` installers.
+  #
+  # @api private
   class Pkg
     def self.all_matching(regexp, command)
       command.run("/usr/sbin/pkgutil", args: ["--pkgs=#{regexp}"]).stdout.split("\n").map do |package_id|

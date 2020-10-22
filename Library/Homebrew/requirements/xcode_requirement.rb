@@ -1,9 +1,15 @@
+# typed: false
 # frozen_string_literal: true
 
 require "requirement"
 
+# A requirement on Xcode.
+#
+# @api private
 class XcodeRequirement < Requirement
   fatal true
+
+  attr_reader :version
 
   satisfy(build_env: false) { xcode_installed_version }
 

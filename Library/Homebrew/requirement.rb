@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "dependable"
@@ -6,8 +7,10 @@ require "dependencies"
 require "build_environment"
 
 # A base class for non-formula requirements needed by formulae.
-# A "fatal" requirement is one that will fail the build if it is not present.
-# By default, Requirements are non-fatal.
+# A fatal requirement is one that will fail the build if it is not present.
+# By default, requirements are non-fatal.
+#
+# @api private
 class Requirement
   include Dependable
 
@@ -53,16 +56,18 @@ class Requirement
 
   # Overriding {#satisfied?} is unsupported.
   # Pass a block or boolean to the satisfy DSL method instead.
-  def satisfied?
+  def satisfied?(env: nil, cc: nil, build_bottle: false, bottle_arch: nil)
     satisfy = self.class.satisfy
     return true unless satisfy
 
-    @satisfied_result = satisfy.yielder { |p| instance_eval(&p) }
+    @satisfied_result =
+      satisfy.yielder(env: env, cc: cc, build_bottle: build_bottle, bottle_arch: bottle_arch) do |p|
+        instance_eval(&p)
+      end
     return false unless @satisfied_result
 
     true
   end
-  alias installed? satisfied?
 
   # Overriding {#fatal?} is unsupported.
   # Pass a boolean to the fatal DSL method instead.
@@ -82,8 +87,8 @@ class Requirement
 
   # Overriding {#modify_build_environment} is unsupported.
   # Pass a block to the env DSL method instead.
-  def modify_build_environment
-    satisfied?
+  def modify_build_environment(env: nil, cc: nil, build_bottle: false, bottle_arch: nil)
+    satisfied?(env: env, cc: cc, build_bottle: build_bottle, bottle_arch: bottle_arch)
     instance_eval(&env_proc) if env_proc
 
     # XXX If the satisfy block returns a Pathname, then make sure that it
@@ -124,10 +129,8 @@ class Requirement
     name
   end
 
-  def mktemp
-    Mktemp.new(name).run do |staging|
-      yield staging
-    end
+  def mktemp(&block)
+    Mktemp.new(name).run(&block)
   end
 
   private
@@ -136,7 +139,11 @@ class Requirement
     klass = self.class.name || self.class.to_s
     klass.sub!(/(Dependency|Requirement)$/, "")
     klass.sub!(/^(\w+::)*/, "")
-    klass.downcase
+    return klass.downcase if klass.present?
+
+    return @cask if @cask.present?
+
+    ""
   end
 
   def which(cmd)
@@ -151,13 +158,14 @@ class Requirement
     include BuildEnvironment::DSL
 
     attr_reader :env_proc, :build
+
     attr_rw :fatal, :cask, :download
 
     def satisfy(options = nil, &block)
       return @satisfied if options.nil? && !block_given?
 
       options = {} if options.nil?
-      @satisfied = Requirement::Satisfier.new(options, &block)
+      @satisfied = Satisfier.new(options, &block)
     end
 
     def env(*settings, &block)
@@ -169,6 +177,7 @@ class Requirement
     end
   end
 
+  # Helper class for evaluating whether a requirement is satisfied.
   class Satisfier
     def initialize(options, &block)
       case options
@@ -181,17 +190,22 @@ class Requirement
       @proc = block
     end
 
-    def yielder
+    def yielder(env: nil, cc: nil, build_bottle: false, bottle_arch: nil)
       if instance_variable_defined?(:@satisfied)
         @satisfied
       elsif @options[:build_env]
         require "extend/ENV"
-        ENV.with_build_environment { yield @proc }
+        ENV.with_build_environment(
+          env: env, cc: cc, build_bottle: build_bottle, bottle_arch: bottle_arch,
+        ) do
+          yield @proc
+        end
       else
         yield @proc
       end
     end
   end
+  private_constant :Satisfier
 
   class << self
     # Expand the requirements of dependent recursively, optionally yielding

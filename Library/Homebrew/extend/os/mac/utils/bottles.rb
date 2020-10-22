@@ -1,12 +1,17 @@
+# typed: true
 # frozen_string_literal: true
 
 module Utils
-  class Bottles
+  module Bottles
     class << self
       undef tag
 
       def tag
-        MacOS.version.to_sym
+        if Hardware::CPU.intel?
+          MacOS.version.to_sym
+        else
+          "#{Hardware::CPU.arch}_#{MacOS.version.to_sym}".to_sym
+        end
       end
     end
 
@@ -17,7 +22,8 @@ module Utils
 
       def find_matching_tag(tag)
         # Used primarily by developers testing beta macOS releases.
-        if OS::Mac.prerelease? && ARGV.skip_or_later_bottles?
+        if OS::Mac.prerelease? && Homebrew::EnvConfig.developer? &&
+           Homebrew::EnvConfig.skip_or_later_bottles?
           generic_find_matching_tag(tag)
         else
           generic_find_matching_tag(tag) ||
@@ -29,13 +35,13 @@ module Utils
       def find_older_compatible_tag(tag)
         tag_version = begin
           MacOS::Version.from_symbol(tag)
-        rescue ArgumentError
+        rescue MacOSVersionError
           return
         end
 
         keys.find do |key|
           MacOS::Version.from_symbol(key) <= tag_version
-        rescue ArgumentError
+        rescue MacOSVersionError
           false
         end
       end

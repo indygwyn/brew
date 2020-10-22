@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module RuboCop
@@ -29,7 +30,13 @@ module RuboCop
         end
 
         def cask_token
-          @cask_token ||= pair_node.val_node.children.first
+          @cask_token ||= begin
+            if dsl_version?
+              pair_node.val_node.children.first
+            else
+              method_node.first_argument.str_content
+            end
+          end
         end
 
         def hash_node

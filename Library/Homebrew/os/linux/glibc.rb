@@ -1,7 +1,11 @@
+# typed: true
 # frozen_string_literal: true
 
 module OS
   module Linux
+    # Helper functions for querying `glibc` information.
+    #
+    # @api private
     module Glibc
       module_function
 
@@ -15,7 +19,7 @@ module OS
       end
 
       def minimum_version
-        Version.new "2.12"
+        Version.new "2.13"
       end
 
       def below_minimum_version?

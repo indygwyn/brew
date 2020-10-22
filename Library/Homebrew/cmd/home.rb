@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cli/parser"
@@ -13,17 +14,30 @@ module Homebrew
         Open <formula>'s homepage in a browser, or open Homebrew's own homepage
         if no formula is provided.
       EOS
-      switch :debug
     end
   end
 
   def home
-    home_args.parse
+    args = home_args.parse
 
-    if args.remaining.empty?
+    if args.no_named?
       exec_browser HOMEBREW_WWW
+      return
+    end
+
+    homepages = args.named.to_formulae_and_casks.map do |formula_or_cask|
+      puts "Opening homepage for #{name_of(formula_or_cask)}"
+      formula_or_cask.homepage
+    end
+
+    exec_browser(*homepages)
+  end
+
+  def name_of(formula_or_cask)
+    if formula_or_cask.is_a? Formula
+      "Formula #{formula_or_cask.name}"
     else
-      exec_browser(*Homebrew.args.formulae.map(&:homepage))
+      "Cask #{formula_or_cask.token}"
     end
   end
 end

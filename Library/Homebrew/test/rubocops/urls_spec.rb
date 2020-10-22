@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "rubocops/urls"
@@ -17,6 +18,11 @@ describe RuboCop::Cop::FormulaAudit::Urls do
     }, {
       "url" => "http://tools.ietf.org/tools/rfcmarkup/rfcmarkup-1.119.tgz",
       "msg" => "Please use https:// for http://tools.ietf.org/tools/rfcmarkup/rfcmarkup-1.119.tgz",
+      "col" => 2,
+    }, {
+      "url" => "https://apache.org/dyn/closer.cgi?path=/apr/apr-1.7.0.tar.bz2",
+      "msg" => "https://apache.org/dyn/closer.cgi?path=/apr/apr-1.7.0.tar.bz2 should be " \
+               "`https://www.apache.org/dyn/closer.lua?path=apr/apr-1.7.0.tar.bz2`",
       "col" => 2,
     }, {
       "url" => "http://search.mcpan.org/CPAN/authors/id/Z/ZE/ZEFRAM/Perl4-CoreLibs-0.003.tar.gz",
@@ -154,6 +160,26 @@ describe RuboCop::Cop::FormulaAudit::Urls do
                        "not a source archive; homebrew/core is source-only.",
       "col"         => 2,
       "formula_tap" => "homebrew-core",
+    }, {
+      "url" => "cvs://brew.sh/foo/bar",
+      "msg" => "Use of the cvs:// scheme is deprecated, pass `:using => :cvs` instead",
+      "col" => 2,
+    }, {
+      "url" => "bzr://brew.sh/foo/bar",
+      "msg" => "Use of the bzr:// scheme is deprecated, pass `:using => :bzr` instead",
+      "col" => 2,
+    }, {
+      "url" => "hg://brew.sh/foo/bar",
+      "msg" => "Use of the hg:// scheme is deprecated, pass `:using => :hg` instead",
+      "col" => 2,
+    }, {
+      "url" => "fossil://brew.sh/foo/bar",
+      "msg" => "Use of the fossil:// scheme is deprecated, pass `:using => :fossil` instead",
+      "col" => 2,
+    }, {
+      "url" => "svn+http://brew.sh/foo/bar",
+      "msg" => "Use of the svn+http:// scheme is deprecated, pass `:using => :svn` instead",
+      "col" => 2,
     }]
   }
 
@@ -213,34 +239,263 @@ describe RuboCop::Cop::FormulaAudit::Urls do
       RUBY
     end
   end
+
+  include_examples "formulae exist", described_class::BINARY_BOOTSTRAP_FORMULA_URLS_ALLOWLIST
 end
 
 describe RuboCop::Cop::FormulaAudit::PyPiUrls do
   subject(:cop) { described_class.new }
 
-  context "when a pypi.python.org URL is used" do
-    it "reports an offense" do
+  context "when a pypi URL is used" do
+    it "reports an offense for pypi.python.org urls" do
       expect_offense(<<~RUBY)
         class Foo < Formula
           desc "foo"
           url "https://pypi.python.org/packages/source/foo/foo-0.1.tar.gz"
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ https://pypi.python.org/packages/source/foo/foo-0.1.tar.gz should be `https://files.pythonhosted.org/packages/source/foo/foo-0.1.tar.gz`
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ use the `Source` url found on PyPI downloads page (`https://pypi.org/project/foo/#files`)
         end
       RUBY
     end
 
-    it "support auto-correction" do
-      corrected = autocorrect_source(<<~RUBY)
+    it "reports an offense for short file.pythonhosted.org urls" do
+      expect_offense(<<~RUBY)
         class Foo < Formula
           desc "foo"
-          url "https://pypi.python.org/packages/source/foo/foo-0.1.tar.gz"
+          url "https://files.pythonhosted.org/packages/source/f/foo/foo-0.1.tar.gz"
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ use the `Source` url found on PyPI downloads page (`https://pypi.org/project/foo/#files`)
         end
       RUBY
+    end
 
-      expect(corrected).to eq <<~RUBY
+    it "reports no offenses for long file.pythonhosted.org urls" do
+      expect_no_offenses(<<~RUBY)
         class Foo < Formula
           desc "foo"
-          url "https://files.pythonhosted.org/packages/source/foo/foo-0.1.tar.gz"
+          url "https://files.pythonhosted.org/packages/a0/b1/a01b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f/foo-0.1.tar.gz"
+        end
+      RUBY
+    end
+  end
+end
+
+describe RuboCop::Cop::FormulaAudit::GitUrls do
+  subject(:cop) { described_class.new }
+
+  context "when a git URL is used" do
+    it "reports no offenses with a non-git url" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://foo.com"
+        end
+      RUBY
+    end
+
+    it "reports no offenses with both a tag and a revision" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+              tag:      "v1.0.0",
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        end
+      RUBY
+    end
+
+    it "reports no offenses with both a tag, revision and `shallow` before" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+              shallow:  false,
+              tag:      "v1.0.0",
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        end
+      RUBY
+    end
+
+    it "reports no offenses with both a tag, revision and `shallow` after" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+              tag:      "v1.0.0",
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              shallow:  false
+        end
+      RUBY
+    end
+
+    it "reports an offense with no `revision`" do
+      expect_offense(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Formulae in homebrew/core should specify a revision for git urls
+              tag: "v1.0.0"
+        end
+      RUBY
+    end
+
+    it "reports an offense with no `revision` and `shallow`" do
+      expect_offense(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Formulae in homebrew/core should specify a revision for git urls
+              shallow: false,
+              tag:     "v1.0.0"
+        end
+      RUBY
+    end
+
+    it "reports no offenses with no `tag`" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        end
+      RUBY
+    end
+
+    it "reports no offenses with no `tag` and `shallow`" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              shallow:  false
+        end
+      RUBY
+    end
+
+    it "reports no offenses with missing arguments in `head`" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://foo.com"
+          head do
+            url "https://github.com/foo/bar.git"
+          end
+        end
+      RUBY
+    end
+
+    it "reports no offenses with missing arguments in `devel`" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://foo.com"
+          devel do
+            url "https://github.com/foo/bar.git"
+          end
+        end
+      RUBY
+    end
+
+    it "reports no offenses for non-core taps" do
+      expect_no_offenses(<<~RUBY)
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git"
+        end
+      RUBY
+    end
+  end
+end
+
+describe RuboCop::Cop::FormulaAuditStrict::GitUrls do
+  subject(:cop) { described_class.new }
+
+  context "when a git URL is used" do
+    it "reports no offenses with both a tag and a revision" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+              tag:      "v1.0.0",
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        end
+      RUBY
+    end
+
+    it "reports no offenses with both a tag, revision and `shallow` before" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+              shallow:  false,
+              tag:      "v1.0.0",
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        end
+      RUBY
+    end
+
+    it "reports no offenses with both a tag, revision and `shallow` after" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+              tag:      "v1.0.0",
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              shallow:  false
+        end
+      RUBY
+    end
+
+    it "reports an offense with no `tag`" do
+      expect_offense(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Formulae in homebrew/core should specify a tag for git urls
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        end
+      RUBY
+    end
+
+    it "reports an offense with no `tag` and `shallow`" do
+      expect_offense(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git",
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Formulae in homebrew/core should specify a tag for git urls
+              revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              shallow:  false
+        end
+      RUBY
+    end
+
+    it "reports no offenses with missing arguments in `head`" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://foo.com"
+          head do
+            url "https://github.com/foo/bar.git"
+          end
+        end
+      RUBY
+    end
+
+    it "reports no offenses with missing arguments in `devel`" do
+      expect_no_offenses(<<~RUBY, "/homebrew-core/")
+        class Foo < Formula
+          desc "foo"
+          url "https://foo.com"
+          devel do
+            url "https://github.com/foo/bar.git"
+          end
+        end
+      RUBY
+    end
+
+    it "reports no offenses for non-core taps" do
+      expect_no_offenses(<<~RUBY)
+        class Foo < Formula
+          desc "foo"
+          url "https://github.com/foo/bar.git"
         end
       RUBY
     end

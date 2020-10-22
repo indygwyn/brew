@@ -1,9 +1,11 @@
+# typed: false
 # frozen_string_literal: true
 
 require "formula"
 require "formula_creator"
 require "missing_formula"
 require "cli/parser"
+require "utils/pypi"
 
 module Homebrew
   module_function
@@ -17,20 +19,26 @@ module Homebrew
         Homebrew will attempt to automatically derive the formula name and version, but
         if it fails, you'll have to make your own template. The `wget` formula serves as
         a simple example. For the complete API, see:
-        <http://www.rubydoc.info/github/Homebrew/brew/master/Formula>
+        <https://rubydoc.brew.sh/Formula>
       EOS
       switch "--autotools",
              description: "Create a basic template for an Autotools-style build."
       switch "--cmake",
              description: "Create a basic template for a CMake-style build."
+      switch "--crystal",
+             description: "Create a basic template for a Crystal build."
       switch "--go",
              description: "Create a basic template for a Go build."
       switch "--meson",
              description: "Create a basic template for a Meson-style build."
+      switch "--node",
+             description: "Create a basic template for a Node build."
       switch "--perl",
              description: "Create a basic template for a Perl build."
       switch "--python",
              description: "Create a basic template for a Python build."
+      switch "--ruby",
+             description: "Create a basic template for a Ruby build."
       switch "--rust",
              description: "Create a basic template for a Rust build."
       switch "--no-fetch",
@@ -43,34 +51,36 @@ module Homebrew
              description: "Explicitly set the <name> of the new formula."
       flag   "--set-version=",
              description: "Explicitly set the <version> of the new formula."
+      flag   "--set-license=",
+             description: "Explicitly set the <license> of the new formula."
       flag   "--tap=",
              description: "Generate the new formula within the given tap, specified as <user>`/`<repo>."
-      switch :force
-      switch :verbose
-      switch :debug
-      conflicts "--autotools", "--cmake", "--go", "--meson", "--perl", "--python", "--rust"
-      max_named 1
+      switch "-f", "--force",
+             description: "Ignore errors for disallowed formula names and named that shadow aliases."
+
+      conflicts "--autotools", "--cmake", "--crystal", "--go", "--meson", "--node", "--perl", "--python", "--rust"
+      named 1
     end
   end
 
   # Create a formula from a tarball URL
   def create
-    create_args.parse
-
-    raise UsageError if ARGV.named.empty?
+    args = create_args.parse
 
     # Ensure that the cache exists so we can fetch the tarball
     HOMEBREW_CACHE.mkpath
 
-    url = ARGV.named.first # Pull the first (and only) url from ARGV
+    url = args.named.first # Pull the first (and only) url from ARGV
 
     version = args.set_version
     name = args.set_name
+    license = args.set_license
     tap = args.tap
 
-    fc = FormulaCreator.new
+    fc = FormulaCreator.new(args)
     fc.name = name
     fc.version = version
+    fc.license = license
     fc.tap = Tap.fetch(tap || "homebrew/core")
     raise TapUnavailableError, tap unless fc.tap.installed?
 
@@ -82,12 +92,18 @@ module Homebrew
       :autotools
     elsif args.meson?
       :meson
+    elsif args.crystal?
+      :crystal
     elsif args.go?
       :go
+    elsif args.node?
+      :node
     elsif args.perl?
       :perl
     elsif args.python?
       :python
+    elsif args.ruby?
+      :ruby
     elsif args.rust?
       :rust
     end
@@ -99,12 +115,12 @@ module Homebrew
       fc.update_path
     end
 
-    # Don't allow blacklisted formula, or names that shadow aliases,
+    # Check for disallowed formula, or names that shadow aliases,
     # unless --force is specified.
     unless args.force?
-      if reason = MissingFormula.blacklisted_reason(fc.name)
+      if reason = MissingFormula.disallowed_reason(fc.name)
         raise <<~EOS
-          #{fc.name} is blacklisted for creation.
+          #{fc.name} is not allowed to be created.
           #{reason}
           If you really want to create this formula use --force.
         EOS
@@ -121,6 +137,8 @@ module Homebrew
     end
 
     fc.generate!
+
+    PyPI.update_python_resources! Formula[fc.name], ignore_non_pypi_packages: true if args.python?
 
     puts "Please run `brew audit --new-formula #{fc.name}` before submitting, thanks."
     exec_editor fc.path

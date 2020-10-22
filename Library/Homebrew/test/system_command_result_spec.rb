@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "system_command"
@@ -120,7 +121,7 @@ describe SystemCommand::Result do
 
       context "when verbose" do
         before do
-          allow(ARGV).to receive(:verbose?).and_return(true)
+          allow(Context).to receive(:current).and_return(Context::ContextStruct.new(verbose: true))
         end
 
         it "warns about garbage" do
@@ -144,7 +145,7 @@ describe SystemCommand::Result do
 
       context "when verbose" do
         before do
-          allow(ARGV).to receive(:verbose?).and_return(true)
+          allow(Context).to receive(:current).and_return(Context::ContextStruct.new(verbose: true))
         end
 
         it "warns about garbage" do

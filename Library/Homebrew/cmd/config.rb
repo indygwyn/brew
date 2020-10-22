@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "system_config"
@@ -14,8 +15,7 @@ module Homebrew
         Show Homebrew and system configuration info useful for debugging. If you file
         a bug report, you will be required to provide this information.
       EOS
-      switch :verbose
-      switch :debug
+
       max_named 0
     end
   end

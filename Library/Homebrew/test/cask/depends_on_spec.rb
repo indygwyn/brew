@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 # TODO: this test should be named after the corresponding class, once
@@ -76,7 +77,7 @@ describe "Satisfy Dependencies and Requirements", :cask do
 
   describe "depends_on x11" do
     before do
-      allow(MacOS::X11).to receive(:installed?).and_return(x11_installed)
+      allow(MacOS::XQuartz).to receive(:installed?).and_return(x11_installed)
     end
 
     context "when satisfied" do

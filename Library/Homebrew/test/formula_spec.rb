@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "test/support/fixtures/testball"
@@ -282,58 +283,46 @@ describe Formula do
   describe "#latest_version_installed?" do
     let(:f) { Testball.new }
 
-    it "returns false if the #installed_prefix is not a directory" do
-      allow(f).to receive(:installed_prefix).and_return(double(directory?: false))
+    it "returns false if the #latest_installed_prefix is not a directory" do
+      allow(f).to receive(:latest_installed_prefix).and_return(double(directory?: false))
       expect(f).not_to be_latest_version_installed
     end
 
-    it "returns false if the #installed_prefix does not have children" do
-      allow(f).to receive(:installed_prefix).and_return(double(directory?: true, children: []))
+    it "returns false if the #latest_installed_prefix does not have children" do
+      allow(f).to receive(:latest_installed_prefix).and_return(double(directory?: true, children: []))
       expect(f).not_to be_latest_version_installed
     end
 
-    it "returns true if the #installed_prefix has children" do
-      allow(f).to receive(:installed_prefix).and_return(double(directory?: true, children: [double]))
+    it "returns true if the #latest_installed_prefix has children" do
+      allow(f).to receive(:latest_installed_prefix).and_return(double(directory?: true, children: [double]))
       expect(f).to be_latest_version_installed
     end
   end
 
-  describe "#installed prefix" do
+  describe "#latest_installed_prefix" do
     let(:f) do
       formula do
         url "foo"
         version "1.9"
-
         head "foo"
-
-        devel do
-          url "foo"
-          version "2.1-devel"
-        end
       end
     end
 
     let(:stable_prefix) { HOMEBREW_CELLAR/f.name/f.version }
-    let(:devel_prefix) { HOMEBREW_CELLAR/f.name/f.devel.version }
     let(:head_prefix) { HOMEBREW_CELLAR/f.name/f.head.version }
 
     it "is the same as #prefix by default" do
-      expect(f.installed_prefix).to eq(f.prefix)
+      expect(f.latest_installed_prefix).to eq(f.prefix)
     end
 
     it "returns the stable prefix if it is installed" do
       stable_prefix.mkpath
-      expect(f.installed_prefix).to eq(stable_prefix)
-    end
-
-    it "returns the devel prefix if it is installed" do
-      devel_prefix.mkpath
-      expect(f.installed_prefix).to eq(devel_prefix)
+      expect(f.latest_installed_prefix).to eq(stable_prefix)
     end
 
     it "returns the head prefix if it is installed" do
       head_prefix.mkpath
-      expect(f.installed_prefix).to eq(head_prefix)
+      expect(f.latest_installed_prefix).to eq(head_prefix)
     end
 
     it "returns the stable prefix if head is outdated" do
@@ -344,28 +333,12 @@ describe Formula do
       tab.source["versions"] = { "stable" => "1.0" }
       tab.write
 
-      expect(f.installed_prefix).to eq(stable_prefix)
-    end
-
-    it "returns the stable prefix if head and devel are outdated" do
-      head_prefix.mkpath
-
-      tab = Tab.empty
-      tab.tabfile = head_prefix/Tab::FILENAME
-      tab.source["versions"] = { "stable" => "1.9", "devel" => "2.0" }
-      tab.write
-
-      expect(f.installed_prefix).to eq(stable_prefix)
-    end
-
-    it "returns the devel prefix if the active specification is :devel" do
-      f.active_spec = :devel
-      expect(f.installed_prefix).to eq(devel_prefix)
+      expect(f.latest_installed_prefix).to eq(stable_prefix)
     end
 
     it "returns the head prefix if the active specification is :head" do
       f.active_spec = :head
-      expect(f.installed_prefix).to eq(head_prefix)
+      expect(f.latest_installed_prefix).to eq(head_prefix)
     end
   end
 
@@ -519,19 +492,12 @@ describe Formula do
       sha256 TEST_SHA256
 
       head "https://brew.sh/test.git", tag: "foo"
-
-      devel do
-        url "https://brew.sh/test-0.2.tbz"
-        mirror "https://example.org/test-0.2.tbz"
-        sha256 TEST_SHA256
-      end
     end
 
     expect(f.homepage).to eq("https://brew.sh")
     expect(f.version).to eq(Version.create("0.1"))
     expect(f).to be_stable
     expect(f.stable.version).to eq(Version.create("0.1"))
-    expect(f.devel.version).to eq(Version.create("0.2"))
     expect(f.head.version).to eq(Version.create("HEAD"))
   end
 
@@ -540,22 +506,12 @@ describe Formula do
       url "foo"
       version "1.0"
       revision 1
-
-      devel do
-        url "foo"
-        version "1.0beta"
-      end
     end
 
     expect(f.active_spec_sym).to eq(:stable)
     expect(f.send(:active_spec)).to eq(f.stable)
     expect(f.pkg_version.to_s).to eq("1.0_1")
 
-    f.active_spec = :devel
-
-    expect(f.active_spec_sym).to eq(:devel)
-    expect(f.send(:active_spec)).to eq(f.devel)
-    expect(f.pkg_version.to_s).to eq("1.0beta_1")
     expect { f.active_spec = :head }.to raise_error(FormulaSpecificationError)
   end
 
@@ -565,7 +521,6 @@ describe Formula do
     end
 
     expect(f.class.stable).to be_kind_of(SoftwareSpec)
-    expect(f.class.devel).to be_kind_of(SoftwareSpec)
     expect(f.class.head).to be_kind_of(SoftwareSpec)
   end
 
@@ -574,7 +529,6 @@ describe Formula do
       url "foo-1.0"
     end
 
-    expect(f.devel).to be nil
     expect(f.head).to be nil
   end
 
@@ -583,14 +537,9 @@ describe Formula do
       url "foo-1.0"
 
       depends_on "foo"
-
-      devel do
-        url "foo-1.1"
-      end
     end
 
     expect(f.class.stable.deps.first.name).to eq("foo")
-    expect(f.class.devel.deps.first.name).to eq("foo")
     expect(f.class.head.deps.first.name).to eq("foo")
   end
 
@@ -644,25 +593,6 @@ describe Formula do
     expect(f.head.version).to eq(Version.create("HEAD-5658946"))
   end
 
-  specify "legacy options" do
-    f = formula do
-      url "foo-1.0"
-
-      def options
-        [
-          ["--foo", "desc"],
-          ["--bar", "desc"],
-        ]
-      end
-
-      option("baz")
-    end
-
-    expect(f).to have_option_defined("foo")
-    expect(f).to have_option_defined("bar")
-    expect(f).to have_option_defined("baz")
-  end
-
   specify "#desc" do
     f = formula do
       desc "a formula"
@@ -673,29 +603,63 @@ describe Formula do
     expect(f.desc).to eq("a formula")
   end
 
-  specify "#test_defined?" do
-    f1 = formula do
-      url "foo-1.0"
-
-      def test
-        # do nothing
-      end
-    end
-
-    f2 = formula do
-      url "foo-1.0"
-    end
-
-    expect(f1).to have_test_defined
-    expect(f2).not_to have_test_defined
-  end
-
   specify "test fixtures" do
     f1 = formula do
       url "foo-1.0"
     end
 
     expect(f1.test_fixtures("foo")).to eq(Pathname.new("#{HOMEBREW_LIBRARY_PATH}/test/support/fixtures/foo"))
+  end
+
+  specify "#livecheck" do
+    f = formula do
+      url "https://brew.sh/test-1.0.tbz"
+      livecheck do
+        skip "foo"
+        url "https://brew.sh/test/releases"
+        regex(/test-v?(\d+(?:\.\d+)+)\.t/i)
+      end
+    end
+
+    expect(f.livecheck.skip?).to be true
+    expect(f.livecheck.skip_msg).to eq("foo")
+    expect(f.livecheck.url).to eq("https://brew.sh/test/releases")
+    expect(f.livecheck.regex).to eq(/test-v?(\d+(?:\.\d+)+)\.t/i)
+  end
+
+  describe "#livecheckable?" do
+    specify "no livecheck block defined" do
+      f = formula do
+        url "https://brew.sh/test-1.0.tbz"
+      end
+
+      expect(f.livecheckable?).to be false
+    end
+
+    specify "livecheck block defined" do
+      f = formula do
+        url "https://brew.sh/test-1.0.tbz"
+        livecheck do
+          regex(/test-v?(\d+(?:\.\d+)+)\.t/i)
+        end
+      end
+
+      expect(f.livecheckable?).to be true
+    end
+
+    specify "livecheck references Formula URL" do
+      f = formula do
+        homepage "https://brew.sh/test"
+
+        url "https://brew.sh/test-1.0.tbz"
+        livecheck do
+          url :homepage
+          regex(/test-v?(\d+(?:\.\d+)+)\.t/i)
+        end
+      end
+
+      expect(f.livecheck.url).to eq("https://brew.sh/test")
+    end
   end
 
   specify "dependencies" do
@@ -765,7 +729,7 @@ describe Formula do
       dependency = formula("dependency") { url "f-1.0" }
 
       formula.brew { formula.install }
-      keg = Keg.for(formula.installed_prefix)
+      keg = Keg.for(formula.latest_installed_prefix)
       keg.link
 
       linkage_checker = double("linkage checker", undeclared_deps: [dependency.name])
@@ -782,7 +746,7 @@ describe Formula do
       tab.runtime_dependencies = ["foo"]
       tab.write
 
-      keg = Keg.for(formula.installed_prefix)
+      keg = Keg.for(formula.latest_installed_prefix)
       keg.link
 
       expect(formula.runtime_dependencies.map(&:name)).to be_empty
@@ -902,7 +866,7 @@ describe Formula do
         head("foo")
       end
 
-      stable_prefix = f.installed_prefix
+      stable_prefix = f.latest_installed_prefix
       stable_prefix.mkpath
 
       [["000000_1", 1], ["111111", 2], ["111111_1", 2]].each do |pkg_version_suffix, stamp|
@@ -1379,6 +1343,24 @@ describe Formula do
         setup_tab_for_prefix(head_prefix, versions: { "stable" => "1.0", "version_scheme" => 2 })
         expect(f.outdated_kegs).to be_empty
       end
+    end
+  end
+
+  describe "#any_installed_version" do
+    let(:f) do
+      Class.new(Testball) do
+        version "1.0"
+        revision 1
+      end.new
+    end
+
+    it "returns nil when not installed" do
+      expect(f.any_installed_version).to be nil
+    end
+
+    it "returns package version when installed" do
+      f.brew { f.install }
+      expect(f.any_installed_version).to eq(PkgVersion.parse("1.0_1"))
     end
   end
 end

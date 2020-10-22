@@ -1,10 +1,13 @@
+# typed: true
 # frozen_string_literal: true
 
 require "tab"
-require "extend/ARGV"
 
 module Utils
-  class Bottles
+  # Helper functions for bottles.
+  #
+  # @api private
+  module Bottles
     class << self
       def tag
         @tag ||= "#{ENV["HOMEBREW_PROCESSOR"]}_#{ENV["HOMEBREW_SYSTEM"]}".downcase.to_sym
@@ -13,7 +16,7 @@ module Utils
       def built_as?(f)
         return false unless f.latest_version_installed?
 
-        tab = Tab.for_keg(f.installed_prefix)
+        tab = Tab.for_keg(f.latest_installed_prefix)
         tab.built_as_bottle
       end
 
@@ -46,10 +49,10 @@ module Utils
         name = receipt_file_path.split("/").first
         tap = Tab.from_file_content(receipt_file, "#{bottle_file}/#{receipt_file_path}").tap
 
-        if tap.nil? || tap.core_tap?
-          full_name = name
+        full_name = if tap.nil? || tap.core_tap?
+          name
         else
-          full_name = "#{tap}/#{name}"
+          "#{tap}/#{name}"
         end
 
         [name, full_name]
@@ -70,7 +73,8 @@ module Utils
       end
     end
 
-    class Bintray
+    # Helper functions for bottles hosted on Bintray.
+    module Bintray
       def self.package(formula_name)
         package_name = formula_name.to_s.dup
         package_name.tr!("+", "x")
@@ -87,7 +91,12 @@ module Utils
       end
     end
 
+    # Collector for bottles specifications.
     class Collector
+      extend Forwardable
+
+      def_delegators :@checksums, :keys, :[], :[]=, :key?, :each_key
+
       def initialize
         @checksums = {}
       end
@@ -95,22 +104,6 @@ module Utils
       def fetch_checksum_for(tag)
         tag = find_matching_tag(tag)
         return self[tag], tag if tag
-      end
-
-      def keys
-        @checksums.keys
-      end
-
-      def [](key)
-        @checksums[key]
-      end
-
-      def []=(key, value)
-        @checksums[key] = value
-      end
-
-      def key?(key)
-        @checksums.key?(key)
       end
 
       private

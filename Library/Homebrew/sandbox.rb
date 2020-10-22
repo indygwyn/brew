@@ -1,25 +1,18 @@
+# typed: false
 # frozen_string_literal: true
 
 require "erb"
 require "tempfile"
 
+# Helper class for running a sub-process inside of a sandboxed environment.
+#
+# @api private
 class Sandbox
   SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+  private_constant :SANDBOX_EXEC
 
   def self.available?
     OS.mac? && File.executable?(SANDBOX_EXEC)
-  end
-
-  def self.formula?(_formula)
-    return false unless available?
-
-    !ARGV.no_sandbox?
-  end
-
-  def self.test?
-    return false unless available?
-
-    !ARGV.no_sandbox?
   end
 
   def initialize
@@ -59,12 +52,12 @@ class Sandbox
   end
 
   def allow_cvs
-    allow_write_path "/Users/#{ENV["USER"]}/.cvspass"
+    allow_write_path "#{Dir.home(ENV["USER"])}/.cvspass"
   end
 
   def allow_fossil
-    allow_write_path "/Users/#{ENV["USER"]}/.fossil"
-    allow_write_path "/Users/#{ENV["USER"]}/.fossil-journal"
+    allow_write_path "#{Dir.home(ENV["USER"])}/.fossil"
+    allow_write_path "#{Dir.home(ENV["USER"])}/.fossil-journal"
   end
 
   def allow_write_cellar(formula)
@@ -75,7 +68,7 @@ class Sandbox
 
   # Xcode projects expect access to certain cache/archive dirs.
   def allow_write_xcode
-    allow_write_path "/Users/#{ENV["USER"]}/Library/Developer"
+    allow_write_path "#{Dir.home(ENV["USER"])}/Library/Developer"
   end
 
   def allow_write_log(formula)
@@ -127,7 +120,7 @@ class Sandbox
         end
       end
 
-      if @failed && ARGV.verbose?
+      if @failed && Homebrew::EnvConfig.verbose?
         ohai "Sandbox log"
         puts logs
         $stdout.flush # without it, brew test-bot would fail to catch the log
@@ -151,6 +144,7 @@ class Sandbox
     end
   end
 
+  # Configuration profile for a sandbox.
   class SandboxProfile
     SEATBELT_ERB = <<~ERB
       (version 1)
@@ -165,7 +159,7 @@ class Sandbox
           (regex #"^/dev/fd/[0-9]+$")
           (regex #"^/dev/tty[a-z0-9]*$")
           )
-      (deny file-write*) ; deny non-whitelist file write operations
+      (deny file-write*) ; deny non-allowlist file write operations
       (allow process-exec
           (literal "/bin/ps")
           (with no-sandbox)
@@ -193,4 +187,5 @@ class Sandbox
       ERB.new(SEATBELT_ERB).result(binding)
     end
   end
+  private_constant :SandboxProfile
 end

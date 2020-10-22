@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "cli/parser"
@@ -10,23 +11,26 @@ module Homebrew
       usage_banner <<~EOS
         `analytics` [<subcommand>]
 
-        If `on` or `off` is passed, turn Homebrew's analytics on or off respectively.
-
-        If `state` is passed, display the current anonymous user behaviour analytics state.
+        Control Homebrew's anonymous aggregate user behaviour analytics.
         Read more at <https://docs.brew.sh/Analytics>.
 
-        If `regenerate-uuid` is passed, regenerate the UUID used in Homebrew's analytics.
+        `brew analytics` [`state`]:
+        Display the current state of Homebrew's analytics.
+
+        `brew analytics` [`on`|`off`]:
+        Turn Homebrew's analytics on or off respectively.
+
+        `brew analytics regenerate-uuid`:
+        Regenerate the UUID used for Homebrew's analytics.
       EOS
-      switch :verbose
-      switch :debug
       max_named 1
     end
   end
 
   def analytics
-    analytics_args.parse
+    args = analytics_args.parse
 
-    case args.remaining.first
+    case args.named.first
     when nil, "state"
       if Utils::Analytics.disabled?
         puts "Analytics are disabled."
@@ -41,7 +45,7 @@ module Homebrew
     when "regenerate-uuid"
       Utils::Analytics.regenerate_uuid!
     else
-      raise UsageError, "Unknown subcommand."
+      raise UsageError, "unknown subcommand: #{args.named.first}"
     end
   end
 end

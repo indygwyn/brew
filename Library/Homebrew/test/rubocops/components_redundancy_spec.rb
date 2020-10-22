@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "rubocops/components_redundancy"
@@ -15,7 +16,7 @@ describe RuboCop::Cop::FormulaAudit::ComponentsRedundancy do
             # stuff
           end
 
-          devel do
+          head do
             # stuff
           end
         end
@@ -67,20 +68,6 @@ describe RuboCop::Cop::FormulaAudit::ComponentsRedundancy do
           end
 
           head do
-            # stuff
-          end
-        end
-      RUBY
-    end
-
-    it "When `stable do` is present with a `devel` block" do
-      expect_no_offenses(<<~RUBY)
-        class Foo < Formula
-          stable do
-            # stuff
-          end
-
-          devel do
             # stuff
           end
         end

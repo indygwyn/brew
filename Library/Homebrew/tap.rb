@@ -1,7 +1,8 @@
+# typed: false
 # frozen_string_literal: true
 
+require "commands"
 require "extend/cachable"
-require "readall"
 require "description_cache_store"
 
 # A {Tap} is used to extend the formulae provided by Homebrew core.
@@ -38,12 +39,9 @@ class Tap
 
   def self.from_path(path)
     match = File.expand_path(path).match(HOMEBREW_TAP_PATH_REGEX)
-    raise "Invalid tap path '#{path}'" unless match
+    return if match.blank? || match[:user].blank? || match[:repo].blank?
 
     fetch(match[:user], match[:repo])
-  rescue
-    # No need to error as a nil tap is sufficient to show failure.
-    nil
   end
 
   def self.default_cask_tap
@@ -224,34 +222,31 @@ class Tap
 
   # Install this {Tap}.
   #
-  # @param  options [Hash]
-  # @option options [String] :clone_target If passed, it will be used as the clone remote.
-  # @option options [Boolean, nil] :force_auto_update If present, whether to override the
+  # @param clone_target [String] If passed, it will be used as the clone remote.
+  # @param force_auto_update [Boolean, nil] If present, whether to override the
   #   logic that skips non-GitHub repositories during auto-updates.
-  # @option options [Boolean] :full_clone If set as true, full clone will be used.
-  # @option options [Boolean] :quiet If set, suppress all output.
-  def install(options = {})
+  # @param full_clone [Boolean] If set as true, full clone will be used. If unset/nil, means "no change".
+  # @param quiet [Boolean] If set, suppress all output.
+  def install(full_clone: true, quiet: false, clone_target: nil, force_auto_update: nil)
     require "descriptions"
-
-    full_clone = options.fetch(:full_clone, false)
-    quiet = options.fetch(:quiet, false)
-    requested_remote = options[:clone_target] || default_remote
-    # if :force_auto_update is unset, use nil, meaning "no change"
-    force_auto_update = options.fetch(:force_auto_update, nil)
+    require "readall"
 
     if official? && DEPRECATED_OFFICIAL_TAPS.include?(repo)
-      odie "#{name} was deprecated. This tap is now empty as all its formulae were migrated."
-    elsif user == "caskroom"
-      odie "#{name} was moved. Tap homebrew/cask-#{repo} instead."
+      odie "#{name} was deprecated. This tap is now empty and all its contents were either deleted or migrated."
+    elsif user == "caskroom" || name == "phinze/cask"
+      new_repo = repo == "cask" ? "cask" : "cask-#{repo}"
+      odie "#{name} was moved. Tap homebrew/#{new_repo} instead."
     end
 
-    if installed? && force_auto_update.nil?
-      raise TapAlreadyTappedError, name unless full_clone
-      raise TapAlreadyUnshallowError, name unless shallow?
+    requested_remote = clone_target || default_remote
+
+    if installed?
+      raise TapRemoteMismatchError.new(name, @remote, requested_remote) if clone_target && requested_remote != remote
+      raise TapAlreadyTappedError, name if force_auto_update.nil? && !shallow?
     end
 
     # ensure git is installed
-    Utils.ensure_git_installed!
+    Utils::Git.ensure_installed!
 
     if installed?
       unless force_auto_update.nil?
@@ -259,11 +254,7 @@ class Tap
         return if !full_clone || !shallow?
       end
 
-      if options[:clone_target] && requested_remote != remote
-        raise TapRemoteMismatchError.new(name, @remote, requested_remote)
-      end
-
-      ohai "Unshallowing #{name}" unless quiet
+      $stderr.ohai "Unshallowing #{name}" unless quiet
       args = %w[fetch --unshallow]
       args << "-q" if quiet
       path.cd { safe_system "git", *args }
@@ -272,15 +263,15 @@ class Tap
 
     clear_cache
 
-    ohai "Tapping #{name}" unless quiet
+    $stderr.ohai "Tapping #{name}" unless quiet
     args =  %W[clone #{requested_remote} #{path}]
     args << "--depth=1" unless full_clone
     args << "-q" if quiet
 
     begin
       safe_system "git", *args
-      unless Readall.valid_tap?(self, aliases: true)
-        raise "Cannot tap #{name}: invalid syntax in tap!" unless ARGV.homebrew_developer?
+      if !Readall.valid_tap?(self, aliases: true) && !Homebrew::EnvConfig.developer?
+        raise "Cannot tap #{name}: invalid syntax in tap!"
       end
     rescue Interrupt, RuntimeError
       ignore_interrupts do
@@ -294,20 +285,21 @@ class Tap
 
     config["forceautoupdate"] = force_auto_update unless force_auto_update.nil?
 
+    Commands.rebuild_commands_completion_list
     link_completions_and_manpages
 
     formatted_contents = contents.presence&.to_sentence&.dup&.prepend(" ")
-    puts "Tapped#{formatted_contents} (#{path.abv})." unless quiet
+    $stderr.puts "Tapped#{formatted_contents} (#{path.abv})." unless quiet
     CacheStoreDatabase.use(:descriptions) do |db|
       DescriptionCacheStore.new(db)
                            .update_from_formula_names!(formula_names)
     end
 
-    return if options[:clone_target]
+    return if clone_target
     return unless private?
     return if quiet
 
-    puts <<~EOS
+    $stderr.puts <<~EOS
       It looks like you tapped a private repository. To avoid entering your
       credentials each time you update, you can use git HTTP credential
       caching or issue the following command:
@@ -327,7 +319,7 @@ class Tap
     require "descriptions"
     raise TapUnavailableError, name unless installed?
 
-    puts "Untapping #{name}..."
+    $stderr.puts "Untapping #{name}..."
 
     abv = path.abv
     formatted_contents = contents.presence&.to_sentence&.dup&.prepend(" ")
@@ -341,7 +333,9 @@ class Tap
     Utils::Link.unlink_completions(path)
     path.rmtree
     path.parent.rmdir_if_possible
-    puts "Untapped#{formatted_contents} (#{abv})."
+    $stderr.puts "Untapped#{formatted_contents} (#{abv})."
+
+    Commands.rebuild_commands_completion_list
     clear_cache
   end
 
@@ -428,7 +422,12 @@ class Tap
 
   # An array of all {Formula} names of this {Tap}.
   def formula_names
-    @formula_names ||= formula_files.map { |f| formula_file_to_name(f) }
+    @formula_names ||= formula_files.map(&method(:formula_file_to_name))
+  end
+
+  # An array of all {Cask} tokens of this {Tap}.
+  def cask_tokens
+    @cask_tokens ||= cask_files.map(&method(:formula_file_to_name))
   end
 
   # path to the directory of all alias files for this {Tap}.
@@ -478,17 +477,10 @@ class Tap
     @command_dir ||= path/"cmd"
   end
 
-  def command_file?(file)
-    file = Pathname.new(file) unless file.is_a? Pathname
-    file = file.expand_path(path)
-    file.parent == command_dir && file.basename.to_s.match?(/^brew(cask)?-/) &&
-      (file.executable? || file.extname == ".rb")
-  end
-
   # An array of all commands files of this {Tap}.
   def command_files
     @command_files ||= if command_dir.directory?
-      command_dir.children.select(&method(:command_file?))
+      Commands.find_commands(command_dir)
     else
       []
     end
@@ -507,26 +499,6 @@ class Tap
     @pinned = pinned_symlink_path.directory?
   end
 
-  # Pin this {Tap}.
-  def pin
-    raise TapUnavailableError, name unless installed?
-    raise TapPinStatusError.new(name, true) if pinned?
-
-    pinned_symlink_path.make_relative_symlink(path)
-    @pinned = true
-  end
-
-  # Unpin this {Tap}.
-  def unpin
-    raise TapUnavailableError, name unless installed?
-    raise TapPinStatusError.new(name, false) unless pinned?
-
-    pinned_symlink_path.delete
-    pinned_symlink_path.parent.rmdir_if_possible
-    pinned_symlink_path.parent.parent.rmdir_if_possible
-    @pinned = false
-  end
-
   def to_hash
     hash = {
       "name"          => name,
@@ -537,8 +509,9 @@ class Tap
       "official"      => official?,
       "formula_names" => formula_names,
       "formula_files" => formula_files.map(&:to_s),
+      "cask_tokens"   => cask_tokens,
+      "cask_files"    => cask_files.map(&:to_s),
       "command_files" => command_files.map(&:to_s),
-      "pinned"        => pinned?,
     }
 
     if installed?
@@ -577,14 +550,14 @@ class Tap
     self.class == other.class && name == other.name
   end
 
-  def self.each
+  def self.each(&block)
     return unless TAP_DIRECTORY.directory?
 
     return to_enum unless block_given?
 
     TAP_DIRECTORY.subdirs.each do |user|
       user.subdirs.each do |repo|
-        yield fetch(user.basename.to_s, repo.basename.to_s)
+        block.call fetch(user.basename.to_s, repo.basename.to_s)
       end
     end
   end
@@ -648,13 +621,15 @@ class CoreTap < Tap
     safe_system HOMEBREW_BREW_FILE, "tap", instance.name
   end
 
-  def install(options = {})
-    if HOMEBREW_CORE_GIT_REMOTE != default_remote
-      puts "HOMEBREW_CORE_GIT_REMOTE set: using #{HOMEBREW_CORE_GIT_REMOTE} " \
-           "for Homebrew/core Git remote URL."
-      options[:clone_target] ||= HOMEBREW_CORE_GIT_REMOTE
+  # CoreTap never allows shallow clones (on request from GitHub).
+  def install(full_clone: true, quiet: false, clone_target: nil, force_auto_update: nil)
+    raise "Shallow clones are not supported for homebrew-core!" unless full_clone
+
+    remote = Homebrew::EnvConfig.core_git_remote
+    if remote != default_remote
+      $stderr.puts "HOMEBREW_CORE_GIT_REMOTE set: using #{remote} for Homebrew/core Git remote URL."
     end
-    super(options)
+    super(full_clone: full_clone, quiet: quiet, clone_target: remote, force_auto_update: force_auto_update)
   end
 
   # @private
@@ -735,7 +710,7 @@ class TapConfig
 
   def [](key)
     return unless tap.git?
-    return unless Utils.git_available?
+    return unless Utils::Git.available?
 
     tap.path.cd do
       Utils.popen_read("git", "config", "--get", "homebrew.#{key}").chomp.presence
@@ -744,7 +719,7 @@ class TapConfig
 
   def []=(key, value)
     return unless tap.git?
-    return unless Utils.git_available?
+    return unless Utils::Git.available?
 
     tap.path.cd do
       safe_system "git", "config", "--replace-all", "homebrew.#{key}", value.to_s
