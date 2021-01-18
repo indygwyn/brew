@@ -15,12 +15,16 @@ BOTTLE_ERB = <<-EOS
     <% if root_url != "#{HOMEBREW_BOTTLE_DEFAULT_DOMAIN}/bottles" %>
     root_url "<%= root_url %>"
     <% end %>
-    <% if ![HOMEBREW_DEFAULT_PREFIX, LINUXBREW_DEFAULT_PREFIX].include?(prefix) %>
+    <% if ![HOMEBREW_DEFAULT_PREFIX,
+            HOMEBREW_MACOS_ARM_DEFAULT_PREFIX,
+            HOMEBREW_LINUX_DEFAULT_PREFIX].include?(prefix) %>
     prefix "<%= prefix %>"
     <% end %>
     <% if cellar.is_a? Symbol %>
     cellar :<%= cellar %>
-    <% elsif ![Homebrew::DEFAULT_CELLAR, "/usr/local/Cellar"].include?(cellar) %>
+    <% elsif ![Homebrew::DEFAULT_MACOS_CELLAR,
+               Homebrew::DEFAULT_MACOS_ARM_CELLAR,
+               Homebrew::DEFAULT_LINUX_CELLAR].include?(cellar) %>
     cellar "<%= cellar %>"
     <% end %>
     <% if rebuild.positive? %>
@@ -38,12 +42,15 @@ EOS
 MAXIMUM_STRING_MATCHES = 100
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def bottle_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
-        `bottle` [<options>] <formula>
+        `bottle` [<options>] <formula> [<formula> ...]
 
         Generate a bottle (binary package) from a formula that was installed with
         `--build-bottle`.
@@ -79,7 +86,8 @@ module Homebrew
              description: "Use the specified <URL> as the root of the bottle's URL instead of Homebrew's default."
 
       conflicts "--no-rebuild", "--keep-old"
-      min_named 1
+
+      named_args :installed_formula, min: 1
     end
   end
 
@@ -165,7 +173,7 @@ module Homebrew
         end
       end
 
-      next unless args.verbose? && !text_matches.empty?
+      next if !args.verbose? || text_matches.empty?
 
       print_filename.call(string, file)
       text_matches.first(MAXIMUM_STRING_MATCHES).each do |match, offset|
@@ -183,7 +191,7 @@ module Homebrew
   def keg_contain_absolute_symlink_starting_with?(string, keg, args:)
     absolute_symlinks_start_with_string = []
     keg.find do |pn|
-      next unless pn.symlink? && (link = pn.readlink).absolute?
+      next if !pn.symlink? || !(link = pn.readlink).absolute?
 
       absolute_symlinks_start_with_string << pn if link.to_s.start_with?(string)
     end
@@ -247,15 +255,14 @@ module Homebrew
     tar_path = Pathname.pwd/tar_filename
 
     prefix = HOMEBREW_PREFIX.to_s
-    repository = HOMEBREW_REPOSITORY.to_s
     cellar = HOMEBREW_CELLAR.to_s
 
     ohai "Bottling #{filename}..."
 
     formula_and_runtime_deps_names = [f.name] + f.runtime_dependencies.map(&:name)
     keg = Keg.new(f.prefix)
-    relocatable = false
-    skip_relocation = false
+    relocatable = T.let(false, T::Boolean)
+    skip_relocation = T.let(false, T::Boolean)
 
     keg.lock do
       original_tab = nil
@@ -319,13 +326,24 @@ module Homebrew
           ignores << %r{#{Regexp.escape(HOMEBREW_CELLAR)}/#{go_regex}/[\d.]+/libexec}
         end
 
+        repository_reference = if HOMEBREW_PREFIX == HOMEBREW_REPOSITORY
+          HOMEBREW_LIBRARY
+        else
+          HOMEBREW_REPOSITORY
+        end.to_s
+        if keg_contain?(repository_reference, keg, ignores, args: args)
+          odie "Bottle contains non-relocatable reference to #{repository_reference}!"
+        end
+
         relocatable = true
         if args.skip_relocation?
           skip_relocation = true
         else
           relocatable = false if keg_contain?(prefix_check, keg, ignores, formula_and_runtime_deps_names, args: args)
-          relocatable = false if keg_contain?(repository, keg, ignores, args: args)
           relocatable = false if keg_contain?(cellar, keg, ignores, formula_and_runtime_deps_names, args: args)
+          if keg_contain?(HOMEBREW_LIBRARY.to_s, keg, ignores, formula_and_runtime_deps_names, args: args)
+            relocatable = false
+          end
           if prefix != prefix_check
             relocatable = false if keg_contain_absolute_symlink_starting_with?(prefix, keg, args: args)
             relocatable = false if keg_contain?("#{prefix}/etc", keg, ignores, args: args)
@@ -429,30 +447,32 @@ module Homebrew
     end
   end
 
-  def merge(args:)
-    bottles_hash = args.named.reduce({}) do |hash, json_file|
-      hash.deep_merge(JSON.parse(IO.read(json_file))) do |key, first, second|
+  def parse_json_files(filenames)
+    filenames.map do |filename|
+      JSON.parse(IO.read(filename))
+    end
+  end
+
+  def merge_json_files(json_files)
+    json_files.reduce({}) do |hash, json_file|
+      hash.deep_merge(json_file) do |key, first, second|
         if key == "cellar"
           # Prioritize HOMEBREW_CELLAR over :any over :any_skip_relocation
           cellars = [first, second]
-          if cellars.include?(HOMEBREW_CELLAR)
-            HOMEBREW_CELLAR
-          elsif first.start_with?("/")
-            first
-          elsif second.start_with?("/")
-            second
-          elsif cellars.include?("any")
-            "any"
-          elsif cellars.include?("any_skip_relocation")
-            "any_skip_relocation"
-          else
-            second
-          end
-        else
-          second
+          next HOMEBREW_CELLAR if cellars.include?(HOMEBREW_CELLAR)
+          next first if first.start_with?("/")
+          next second if second.start_with?("/")
+          next "any" if cellars.include?("any")
+          next "any_skip_relocation" if cellars.include?("any_skip_relocation")
         end
+
+        second
       end
     end
+  end
+
+  def merge(args:)
+    bottles_hash = merge_json_files(parse_json_files(args.named))
 
     any_cellars = ["any", "any_skip_relocation"]
     bottles_hash.each do |formula_name, bottle_hash|
@@ -469,86 +489,31 @@ module Homebrew
         bottle.sha256 tag_hash["sha256"] => tag.to_sym
       end
 
-      output = bottle_output bottle
-
       if args.write?
+        Homebrew.install_bundler_gems!
+        require "utils/ast"
+
         path = Pathname.new((HOMEBREW_REPOSITORY/bottle_hash["formula"]["path"]).to_s)
-        update_or_add = nil
+        formula = Formulary.factory(path)
+        formula_ast = Utils::AST::FormulaAST.new(path.read)
+        checksums = old_checksums(formula, formula_ast, bottle_hash, args: args)
+        update_or_add = checksums.nil? ? "add" : "update"
 
-        Utils::Inreplace.inreplace(path) do |s|
-          if s.inreplace_string.include? "bottle do"
-            update_or_add = "update"
-            if args.keep_old?
-              mismatches = []
-              valid_keys = %w[root_url prefix cellar rebuild sha1 sha256]
-              bottle_block_contents = s.inreplace_string[/  bottle do(.+?)end\n/m, 1]
-              bottle_block_contents.lines.each do |line|
-                line = line.strip
-                next if line.empty?
+        checksums&.each(&bottle.method(:sha256))
+        output = bottle_output(bottle)
+        puts output
 
-                key, old_value_original, _, tag = line.split " ", 4
-                next unless valid_keys.include?(key)
-
-                old_value = old_value_original.to_s.delete "'\""
-                old_value = old_value.to_s.delete ":" if key != "root_url"
-                tag = tag.to_s.delete ":"
-
-                unless tag.empty?
-                  if bottle_hash["bottle"]["tags"][tag].present?
-                    mismatches << "#{key} => #{tag}"
-                  else
-                    bottle.send(key, old_value => tag.to_sym)
-                  end
-                  next
-                end
-
-                value_original = bottle_hash["bottle"][key]
-                value = value_original.to_s
-                next if key == "cellar" && old_value == "any" && value == "any_skip_relocation"
-                next unless old_value.empty? || value != old_value
-
-                old_value = old_value_original.inspect
-                value = value_original.inspect
-                mismatches << "#{key}: old: #{old_value}, new: #{value}"
-              end
-
-              unless mismatches.empty?
-                odie <<~EOS
-                  --keep-old was passed but there are changes in:
-                  #{mismatches.join("\n")}
-                EOS
-              end
-              output = bottle_output bottle
-            end
-            puts output
-            string = s.sub!(/  bottle do.+?end\n/m, output)
-            odie "Bottle block update failed!" unless string
-          else
-            odie "--keep-old was passed but there was no existing bottle block!" if args.keep_old?
-            puts output
-            update_or_add = "add"
-            pattern = /(
-                (\ {2}\#[^\n]*\n)*                                                # comments
-                \ {2}(                                                            # two spaces at the beginning
-                  (url|head)\ ['"][\S\ ]+['"]                                     # url or head with a string
-                  (
-                    ,[\S\ ]*$                                                     # url may have options
-                    (\n^\ {3}[\S\ ]+$)*                                           # options can be in multiple lines
-                  )?|
-                  (homepage|desc|sha256|version|mirror|license)\ ['"][\S\ ]+['"]| # specs with a string
-                  (license)\ [^\[]+?\[[^\]]+?\]|                                  # license may contain a list
-                  (revision|version_scheme)\ \d+|                                 # revision with a number
-                  (stable|livecheck)\ do(\n+^\ {4}[\S\ ]+$)*\n+^\ {2}end          # components with blocks
-                )\n+                                                              # multiple empty lines
-               )+
-             /mx
-            string = s.sub!(pattern, "\\0#{output}\n")
-            odie "Bottle block addition failed!" unless string
-          end
+        case update_or_add
+        when "update"
+          formula_ast.replace_bottle_block(output)
+        when "add"
+          formula_ast.add_bottle_block(output)
         end
+        path.atomic_write(formula_ast.process)
 
         unless args.no_commit?
           Utils::Git.set_name_email!
+          Utils::Git.setup_gpg!
 
           short_name = formula_name.split("/", -1).last
           pkg_version = bottle_hash["formula"]["pkg_version"]
@@ -560,8 +525,65 @@ module Homebrew
           end
         end
       else
-        puts output
+        puts bottle_output(bottle)
       end
     end
+  end
+
+  def merge_bottle_spec(old_keys, old_bottle_spec, new_bottle_hash)
+    mismatches = []
+    checksums = []
+
+    new_values = {
+      root_url: new_bottle_hash["root_url"],
+      prefix:   new_bottle_hash["prefix"],
+      cellar:   new_bottle_hash["cellar"],
+      rebuild:  new_bottle_hash["rebuild"],
+    }
+
+    old_keys.each do |key|
+      next if key == :sha256
+
+      old_value = old_bottle_spec.send(key).to_s
+      new_value = new_values[key].to_s
+      next if key == :cellar && old_value == "any" && new_value == "any_skip_relocation"
+      next if old_value.present? && new_value == old_value
+
+      mismatches << "#{key}: old: #{old_value.inspect}, new: #{new_value.inspect}"
+    end
+
+    return [mismatches, checksums] if old_keys.exclude? :sha256
+
+    old_bottle_spec.collector.each_key do |tag|
+      old_value = old_bottle_spec.collector[tag].hexdigest
+      new_value = new_bottle_hash.dig("tags", tag.to_s)
+      if new_value.present?
+        mismatches << "sha256 => #{tag}"
+      else
+        checksums << { old_value => tag }
+      end
+    end
+
+    [mismatches, checksums]
+  end
+
+  def old_checksums(formula, formula_ast, bottle_hash, args:)
+    bottle_node = formula_ast.bottle_block
+    if bottle_node.nil?
+      odie "--keep-old was passed but there was no existing bottle block!" if args.keep_old?
+      return
+    end
+    return [] unless args.keep_old?
+
+    old_keys = Utils::AST.body_children(bottle_node.body).map(&:method_name)
+    old_bottle_spec = formula.bottle_specification
+    mismatches, checksums = merge_bottle_spec(old_keys, old_bottle_spec, bottle_hash["bottle"])
+    if mismatches.present?
+      odie <<~EOS
+        --keep-old was passed but there are changes in:
+        #{mismatches.join("\n")}
+      EOS
+    end
+    checksums
   end
 end

@@ -15,6 +15,8 @@ module Cask
     #
     # @api private
     class AbstractUninstall < AbstractArtifact
+      extend T::Sig
+
       ORDERED_DIRECTIVES = [
         :early_script,
         :launchctl,
@@ -53,6 +55,7 @@ module Cask
         directives.to_h
       end
 
+      sig { returns(String) }
       def summarize
         to_h.flat_map { |key, val| Array(val).map { |v| "#{key.inspect} => #{v.inspect}" } }.join(", ")
       end
@@ -79,7 +82,7 @@ module Cask
 
       # Preserve prior functionality of script which runs first. Should rarely be needed.
       # :early_script should not delete files, better defer that to :script.
-      # If Cask writers never need :early_script it may be removed in the future.
+      # If cask writers never need :early_script it may be removed in the future.
       def uninstall_early_script(directives, **options)
         uninstall_script(directives, directive_name: :early_script, **options)
       end
@@ -120,14 +123,15 @@ module Cask
 
       def running_processes(bundle_id)
         system_command!("/bin/launchctl", args: ["list"])
-          .stdout.lines
+          .stdout.lines.drop(1)
           .map { |line| line.chomp.split("\t") }
           .map { |pid, state, id| [pid.to_i, state.to_i, id] }
           .select do |(pid, _, id)|
-            pid.nonzero? && id.match?(/^#{Regexp.escape(bundle_id)}($|\.\d+)/)
+            pid.nonzero? && /\A(?:application\.)?#{Regexp.escape(bundle_id)}(?:\.\d+){0,2}\Z/.match?(id)
           end
       end
 
+      sig { returns(String) }
       def automation_access_instructions
         "Enable Automation Access for “Terminal > System Events” in " \
         "“System Preferences > Security > Privacy > Automation” if you haven't already."

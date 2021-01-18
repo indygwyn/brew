@@ -7,12 +7,15 @@ require "cli/parser"
 require "commands"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def options_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
-        `options` [<options>] [<formula>]
+        `options` [<options>] [<formula>] [<formula> ...]
 
         Show install options specific to <formula>.
       EOS
@@ -26,6 +29,8 @@ module Homebrew
              description: "Show options for the specified <command>."
 
       conflicts "--installed", "--all", "--command"
+
+      named_args :formula
     end
   end
 

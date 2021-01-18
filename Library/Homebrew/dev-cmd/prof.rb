@@ -4,8 +4,11 @@
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def prof_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
@@ -15,6 +18,8 @@ module Homebrew
       EOS
       switch "--stackprof",
              description: "Use `stackprof` instead of `ruby-prof` (the default)."
+
+      named_args :command
     end
   end
 
@@ -23,6 +28,8 @@ module Homebrew
 
     brew_rb = (HOMEBREW_LIBRARY_PATH/"brew.rb").resolved_path
     FileUtils.mkdir_p "prof"
+    cmd = args.named.first
+    raise UsageError, "#{cmd} is a Bash command!" if Commands.path(cmd).extname == ".sh"
 
     if args.stackprof?
       Homebrew.install_gem_setup_path! "stackprof"

@@ -5,8 +5,11 @@ require "cli/parser"
 require "utils/github"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def sponsors_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
@@ -14,6 +17,8 @@ module Homebrew
 
         Print a Markdown summary of Homebrew's GitHub Sponsors, suitable for pasting into a README.
       EOS
+
+      named_args :none
     end
   end
 

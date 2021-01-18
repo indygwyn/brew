@@ -14,6 +14,8 @@ OPTION_DESC_WIDTH = 43
 module Homebrew
   module CLI
     class Parser
+      extend T::Sig
+
       attr_reader :processed_options, :hide_from_man_page
 
       def self.from_cmd_path(cmd_path)
@@ -31,78 +33,82 @@ module Homebrew
       def self.global_cask_options
         [
           [:flag, "--appdir=", {
-            description: "Target location for Applications. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:appdir]}`",
+            description: "Target location for Applications " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:appdir]}`).",
           }],
           [:flag, "--colorpickerdir=", {
-            description: "Target location for Color Pickers. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:colorpickerdir]}`",
+            description: "Target location for Color Pickers " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:colorpickerdir]}`).",
           }],
           [:flag, "--prefpanedir=", {
-            description: "Target location for Preference Panes. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:prefpanedir]}`",
+            description: "Target location for Preference Panes " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:prefpanedir]}`).",
           }],
           [:flag, "--qlplugindir=", {
-            description: "Target location for QuickLook Plugins. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:qlplugindir]}`",
+            description: "Target location for QuickLook Plugins " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:qlplugindir]}`).",
           }],
           [:flag, "--mdimporterdir=", {
-            description: "Target location for Spotlight Plugins. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:mdimporterdir]}`",
+            description: "Target location for Spotlight Plugins " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:mdimporterdir]}`).",
           }],
           [:flag, "--dictionarydir=", {
-            description: "Target location for Dictionaries. " \
-                          "Default: `#{Cask::Config::DEFAULT_DIRS[:dictionarydir]}`",
+            description: "Target location for Dictionaries " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:dictionarydir]}`).",
           }],
           [:flag, "--fontdir=", {
-            description: "Target location for Fonts. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:fontdir]}`",
+            description: "Target location for Fonts " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:fontdir]}`).",
           }],
           [:flag, "--servicedir=", {
-            description: "Target location for Services. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:servicedir]}`",
+            description: "Target location for Services " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:servicedir]}`).",
           }],
-          [:flag, "--input_methoddir=", {
-            description: "Target location for Input Methods. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:input_methoddir]}`",
+          [:flag, "--input-methoddir=", {
+            description: "Target location for Input Methods " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:input_methoddir]}`).",
           }],
-          [:flag, "--internet_plugindir=", {
-            description: "Target location for Internet Plugins. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:internet_plugindir]}`",
+          [:flag, "--internet-plugindir=", {
+            description: "Target location for Internet Plugins " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:internet_plugindir]}`).",
           }],
-          [:flag, "--audio_unit_plugindir=", {
-            description: "Target location for Audio Unit Plugins. " \
-                        "Default: `#{Cask::Config::DEFAULT_DIRS[:audio_unit_plugindir]}`",
+          [:flag, "--audio-unit-plugindir=", {
+            description: "Target location for Audio Unit Plugins " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:audio_unit_plugindir]}`).",
           }],
-          [:flag, "--vst_plugindir=", {
-            description: "Target location for VST Plugins. " \
-                        "Default: `#{Cask::Config::DEFAULT_DIRS[:vst_plugindir]}`",
+          [:flag, "--vst-plugindir=", {
+            description: "Target location for VST Plugins " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:vst_plugindir]}`).",
           }],
-          [:flag, "--vst3_plugindir=", {
-            description: "Target location for VST3 Plugins. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:vst3_plugindir]}`",
+          [:flag, "--vst3-plugindir=", {
+            description: "Target location for VST3 Plugins " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:vst3_plugindir]}`).",
           }],
-          [:flag, "--screen_saverdir=", {
-            description: "Target location for Screen Savers. " \
-                         "Default: `#{Cask::Config::DEFAULT_DIRS[:screen_saverdir]}`",
+          [:flag, "--screen-saverdir=", {
+            description: "Target location for Screen Savers " \
+                         "(default: `#{Cask::Config::DEFAULT_DIRS[:screen_saverdir]}`).",
           }],
           [:comma_array, "--language", {
-            description: "Set language of the Cask to install. The first matching " \
-                         "language is used, otherwise the default language on the Cask. " \
-                         "The default value is the `language of your system`",
+            description: "Comma-separated list of language codes to prefer for cask installation. " \
+                         "The first matching language is used, otherwise it reverts to the cask's " \
+                         "default language. The default value is the language of your system.",
           }],
         ]
       end
 
+      sig { returns(T::Array[[String, String, String]]) }
       def self.global_options
         [
           ["-d", "--debug",   "Display any debugging information."],
-          ["-q", "--quiet",   "Suppress any warnings."],
+          ["-q", "--quiet",   "Make some output more quiet."],
           ["-v", "--verbose", "Make some output more verbose."],
           ["-h", "--help",    "Show this message."],
         ]
       end
 
+      # FIXME: Block should be `T.nilable(T.proc.bind(Parser).void)`.
+      # See https://github.com/sorbet/sorbet/issues/498.
+      sig { params(block: T.proc.bind(Parser).void).void.checked(:never) }
       def initialize(&block)
         @parser = OptionParser.new
 
@@ -120,9 +126,9 @@ module Homebrew
         @conflicts = []
         @switch_sources = {}
         @processed_options = []
+        @named_args_type = nil
         @max_named_args = nil
         @min_named_args = nil
-        @min_named_type = nil
         @hide_from_man_page = false
         @formula_options = false
 
@@ -130,16 +136,22 @@ module Homebrew
           switch short, long, description: desc, env: option_to_name(long), method: :on_tail
         end
 
-        instance_eval(&block) if block_given?
+        instance_eval(&block) if block
       end
 
-      def switch(*names, description: nil, env: nil, required_for: nil, depends_on: nil, method: :on)
+      def switch(*names, description: nil, replacement: nil, env: nil, required_for: nil, depends_on: nil,
+                 method: :on)
         global_switch = names.first.is_a?(Symbol)
         return if global_switch
 
         description = option_to_description(*names) if description.nil?
-        process_option(*names, description)
+        if replacement.nil?
+          process_option(*names, description)
+        else
+          description += " (disabled#{"; replaced by #{replacement}" if replacement.present?})"
+        end
         @parser.public_send(method, *names, *wrap_option_desc(description)) do |value|
+          odisabled "the `#{names.first}` switch", replacement unless replacement.nil?
           value = if names.any? { |name| name.start_with?("--[no-]") }
             value
           else
@@ -170,7 +182,7 @@ module Homebrew
 
       def usage_banner_text
         @parser.banner
-               .gsub(/^  - (`[^`]+`)\s+/, "\n- \\1  \n  ") # Format `cask` subcommands as MarkDown list.
+               .gsub(/^  - (`[^`]+`)\s+/, "\n- \\1:\n  <br>") # Format `cask` subcommands as Markdown list.
       end
 
       def comma_array(name, description: nil)
@@ -182,7 +194,7 @@ module Homebrew
         end
       end
 
-      def flag(*names, description: nil, required_for: nil, depends_on: nil)
+      def flag(*names, description: nil, replacement: nil, required_for: nil, depends_on: nil)
         required = if names.any? { |name| name.end_with? "=" }
           OptionParser::REQUIRED_ARGUMENT
         else
@@ -190,8 +202,13 @@ module Homebrew
         end
         names.map! { |name| name.chomp "=" }
         description = option_to_description(*names) if description.nil?
-        process_option(*names, description)
+        if replacement.nil?
+          process_option(*names, description)
+        else
+          description += " (disabled#{"; replaced by #{replacement}" if replacement.present?})"
+        end
         @parser.on(*names, *wrap_option_desc(description), required) do |option_value|
+          odisabled "the `#{names.first}` flag", replacement unless replacement.nil?
           names.each do |name|
             @args[option_to_name(name)] = option_value
           end
@@ -258,6 +275,7 @@ module Homebrew
         [remaining, non_options]
       end
 
+      sig { params(argv: T::Array[String], ignore_invalid_options: T::Boolean).returns(Args) }
       def parse(argv = ARGV.freeze, ignore_invalid_options: false)
         raise "Arguments were already parsed!" if @args_parsed
 
@@ -320,8 +338,9 @@ module Homebrew
                  .sub(/^/, "#{Tty.bold}Usage: brew#{Tty.reset} ")
                  .gsub(/`(.*?)`/m, "#{Tty.bold}\\1#{Tty.reset}")
                  .gsub(%r{<([^\s]+?://[^\s]+?)>}) { |url| Formatter.url(url) }
-                 .gsub(/<(.*?)>/m, "#{Tty.underline}\\1#{Tty.reset}")
-                 .gsub(/\*(.*?)\*/m, "#{Tty.underline}\\1#{Tty.reset}")
+                 .gsub(/\*(.*?)\*|<(.*?)>/m) do |underlined|
+                   underlined[1...-1].gsub(/^(\s*)(.*?)$/, "\\1#{Tty.underline}\\2#{Tty.reset}")
+                 end
       end
 
       def cask_options
@@ -331,42 +350,82 @@ module Homebrew
         end
       end
 
+      sig { void }
       def formula_options
         @formula_options = true
       end
 
+      sig do
+        params(
+          type:   T.any(Symbol, T::Array[String], T::Array[Symbol]),
+          number: T.nilable(Integer),
+          min:    T.nilable(Integer),
+          max:    T.nilable(Integer),
+        ).void
+      end
+      def named_args(type = nil, number: nil, min: nil, max: nil)
+        if number.present? && (min.present? || max.present?)
+          raise ArgumentError, "Do not specify both `number` and `min` or `max`"
+        end
+
+        if type == :none && (number.present? || min.present? || max.present?)
+          raise ArgumentError, "Do not specify both `number`, `min` or `max` with `named_args :none`"
+        end
+
+        @named_args_type = type
+
+        if type == :none
+          @max_named_args = 0
+        elsif number.present?
+          @min_named_args = @max_named_args = number
+        elsif min.present? || max.present?
+          @min_named_args = min
+          @max_named_args = max
+        end
+      end
+
       def max_named(count)
+        # TODO: (2.8) uncomment for the next major/minor release
+        # odeprecated "`max_named`", "`named_args max:`"
+
         raise TypeError, "Unsupported type #{count.class.name} for max_named" unless count.is_a?(Integer)
 
         @max_named_args = count
       end
 
       def min_named(count_or_type)
+        # TODO: (2.8) uncomment for the next major/minor release
+        # odeprecated "`min_named`", "`named_args min:`"
+
         case count_or_type
         when Integer
           @min_named_args = count_or_type
-          @min_named_type = nil
+          @named_args_type = nil
         when Symbol
           @min_named_args = 1
-          @min_named_type = count_or_type
+          @named_args_type = count_or_type
         else
           raise TypeError, "Unsupported type #{count_or_type.class.name} for min_named"
         end
       end
 
       def named(count_or_type)
+        # TODO: (2.8) uncomment for the next major/minor release
+        # odeprecated "`named`", "`named_args`"
+
         case count_or_type
         when Integer
           @max_named_args = @min_named_args = count_or_type
-          @min_named_type = nil
+          @named_args_type = nil
         when Symbol
           @max_named_args = @min_named_args = 1
-          @min_named_type = count_or_type
+          @named_args_type = count_or_type
         else
           raise TypeError, "Unsupported type #{count_or_type.class.name} for named"
         end
       end
 
+      sig { void }
       def hide_from_man_page!
         @hide_from_man_page = true
       end
@@ -411,6 +470,10 @@ module Homebrew
         @constraints.each do |primary, secondary, constraint_type|
           primary_passed = option_passed?(primary)
           secondary_passed = option_passed?(secondary)
+
+          primary = name_to_option(primary)
+          secondary = name_to_option(secondary)
+
           if :mandatory.equal?(constraint_type) && primary_passed && !secondary_passed
             raise OptionConstraintError.new(primary, secondary)
           end
@@ -454,20 +517,24 @@ module Homebrew
       end
 
       def check_named_args(args)
-        min_exception = case @min_named_type
-        when :cask
-          Cask::CaskUnspecifiedError
-        when :formula
-          FormulaUnspecifiedError
-        when :formula_or_cask
-          FormulaOrCaskUnspecifiedError
-        when :keg
-          KegUnspecifiedError
-        else
-          MinNamedArgumentsError.new(@min_named_args)
+        exception = if @min_named_args && args.size < @min_named_args
+          if @named_args_type.present?
+            types = Array(@named_args_type)
+            if types.any? { |arg| arg.is_a? String }
+              MinNamedArgumentsError.new(@min_named_args)
+            else
+              list = types.map { |type| type.to_s.tr("_", " ") }
+              list = list.to_sentence two_words_connector: " or ", last_word_connector: " or "
+              UsageError.new("this command requires a #{list} argument")
+            end
+          else
+            MinNamedArgumentsError.new(@min_named_args)
+          end
+        elsif @max_named_args && args.size > @max_named_args
+          MaxNamedArgumentsError.new(@max_named_args)
         end
-        raise min_exception if @min_named_args && args.size < @min_named_args
-        raise MaxNamedArgumentsError, @max_named_args if @max_named_args && args.size > @max_named_args
+
+        raise exception if exception
       end
 
       def process_option(*args)
@@ -506,18 +573,18 @@ module Homebrew
       end
     end
 
-    class OptionConstraintError < RuntimeError
+    class OptionConstraintError < UsageError
       def initialize(arg1, arg2, missing: false)
-        message = if !missing
-          "`#{arg1}` and `#{arg2}` should be passed together."
-        else
+        message = if missing
           "`#{arg2}` cannot be passed without `#{arg1}`."
+        else
+          "`#{arg1}` and `#{arg2}` should be passed together."
         end
         super message
       end
     end
 
-    class OptionConflictError < RuntimeError
+    class OptionConflictError < UsageError
       def initialize(args)
         args_list = args.map(&Formatter.public_method(:option))
                         .join(" and ")
@@ -525,13 +592,16 @@ module Homebrew
       end
     end
 
-    class InvalidConstraintError < RuntimeError
+    class InvalidConstraintError < UsageError
       def initialize(arg1, arg2)
         super "`#{arg1}` and `#{arg2}` cannot be mutually exclusive and mutually dependent simultaneously."
       end
     end
 
     class MaxNamedArgumentsError < UsageError
+      extend T::Sig
+
+      sig { params(maximum: Integer).void }
       def initialize(maximum)
         super case maximum
         when 0
@@ -543,6 +613,9 @@ module Homebrew
     end
 
     class MinNamedArgumentsError < UsageError
+      extend T::Sig
+
+      sig { params(minimum: Integer).void }
       def initialize(minimum)
         super "This command requires at least #{minimum} named #{"argument".pluralize(minimum)}."
       end

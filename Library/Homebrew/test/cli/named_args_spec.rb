@@ -150,16 +150,49 @@ describe Homebrew::CLI::NamedArgs do
       expect(described_class.new("foo", "baz").to_paths).to eq [formula_path, cask_path]
     end
 
-    it "returns only formulae when `only: :formulae` is specified" do
+    it "returns only formulae when `only: :formula` is specified" do
       expect(Formulary).to receive(:path).with("foo").and_return(formula_path)
 
-      expect(described_class.new("foo", "baz").to_paths(only: :formulae)).to eq [formula_path, Formulary.path("baz")]
+      expect(described_class.new("foo", "baz").to_paths(only: :formula)).to eq [formula_path, Formulary.path("baz")]
     end
 
-    it "returns only casks when `only: :casks` is specified" do
+    it "returns only casks when `only: :cask` is specified" do
       expect(Cask::CaskLoader).to receive(:path).with("foo").and_return(cask_path)
 
-      expect(described_class.new("foo", "baz").to_paths(only: :casks)).to eq [cask_path, Cask::CaskLoader.path("baz")]
+      expect(described_class.new("foo", "baz").to_paths(only: :cask)).to eq [cask_path, Cask::CaskLoader.path("baz")]
+    end
+  end
+
+  describe "#to_taps" do
+    it "returns taps" do
+      taps = described_class.new("homebrew/foo", "bar/baz")
+      expect(taps.to_taps.map(&:name)).to eq %w[homebrew/foo bar/baz]
+    end
+
+    it "raises an error for invalid tap" do
+      taps = described_class.new("homebrew/foo", "barbaz")
+      expect { taps.to_taps }.to raise_error(RuntimeError, /Invalid tap name/)
+    end
+  end
+
+  describe "#to_installed_taps" do
+    before do
+      (HOMEBREW_REPOSITORY/"Library/Taps/homebrew/homebrew-foo").mkpath
+    end
+
+    it "returns installed taps" do
+      taps = described_class.new("homebrew/foo")
+      expect(taps.to_installed_taps.map(&:name)).to eq %w[homebrew/foo]
+    end
+
+    it "raises an error for uninstalled tap" do
+      taps = described_class.new("homebrew/foo", "bar/baz")
+      expect { taps.to_installed_taps }.to raise_error(TapUnavailableError)
+    end
+
+    it "raises an error for invalid tap" do
+      taps = described_class.new("homebrew/foo", "barbaz")
+      expect { taps.to_installed_taps }.to raise_error(RuntimeError, /Invalid tap name/)
     end
   end
 end

@@ -11,10 +11,8 @@ describe Cask::Cmd, :cask do
   context "::run" do
     let(:noop_command) { double("Cmd::Noop", run: nil) }
 
-    it "prints help output when subcommand receives `--help` flag" do
-      expect {
-        described_class.run("info", "--help")
-      }.to output(/Displays information about the given cask/).to_stdout
+    before do
+      allow(Homebrew).to receive(:raise_deprecation_exceptions?).and_return(false)
     end
 
     it "exits with a status of 1 when something goes wrong" do

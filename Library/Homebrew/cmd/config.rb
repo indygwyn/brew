@@ -1,12 +1,15 @@
-# typed: false
+# typed: true
 # frozen_string_literal: true
 
 require "system_config"
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def config_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
@@ -16,7 +19,7 @@ module Homebrew
         a bug report, you will be required to provide this information.
       EOS
 
-      max_named 0
+      named_args :none
     end
   end
 

@@ -6,8 +6,11 @@ require "cli/parser"
 require "cask/caskroom"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def doctor_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
@@ -24,6 +27,8 @@ module Homebrew
                           "if provided as arguments."
       switch "-D", "--audit-debug",
              description: "Enable debugging and profiling of audit methods."
+
+      named_args :diagnostic_check
     end
   end
 
@@ -60,7 +65,7 @@ module Homebrew
       end
 
       out = checks.send(method)
-      next if out.nil? || out.empty?
+      next if out.blank?
 
       if first_warning
         $stderr.puts <<~EOS

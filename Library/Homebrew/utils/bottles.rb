@@ -9,6 +9,8 @@ module Utils
   # @api private
   module Bottles
     class << self
+      extend T::Sig
+
       def tag
         @tag ||= "#{ENV["HOMEBREW_PROCESSOR"]}_#{ENV["HOMEBREW_SYSTEM"]}".downcase.to_sym
       end
@@ -22,7 +24,7 @@ module Utils
 
       def file_outdated?(f, file)
         filename = file.basename.to_s
-        return unless f.bottle && filename.match(Pathname::BOTTLE_EXTNAME_RX)
+        return if f.bottle.blank? || !filename.match?(Pathname::BOTTLE_EXTNAME_RX)
 
         bottle_ext = filename[native_regex, 1]
         bottle_url_ext = f.bottle.url[native_regex, 1]
@@ -30,6 +32,7 @@ module Utils
         bottle_ext && bottle_url_ext && bottle_ext != bottle_url_ext
       end
 
+      sig { returns(Regexp) }
       def native_regex
         /(\.#{Regexp.escape(tag.to_s)}\.bottle\.(\d+\.)?tar\.gz)$/o
       end
@@ -91,12 +94,15 @@ module Utils
       end
     end
 
-    # Collector for bottles specifications.
+    # Collector for bottle specifications.
     class Collector
+      extend T::Sig
+
       extend Forwardable
 
       def_delegators :@checksums, :keys, :[], :[]=, :key?, :each_key
 
+      sig { void }
       def initialize
         @checksums = {}
       end

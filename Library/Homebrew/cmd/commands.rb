@@ -4,8 +4,11 @@
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def commands_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
@@ -19,7 +22,7 @@ module Homebrew
              depends_on:  "--quiet",
              description: "Include aliases of internal commands."
 
-      max_named 0
+      named_args :none
     end
   end
 

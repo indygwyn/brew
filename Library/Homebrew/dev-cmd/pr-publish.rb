@@ -5,8 +5,11 @@ require "cli/parser"
 require "utils/github"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def pr_publish_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
@@ -26,7 +29,7 @@ module Homebrew
       flag   "--workflow=",
              description: "Target workflow filename (default: `publish-commit-bottles.yml`)."
 
-      min_named 1
+      named_args min: 1
     end
   end
 

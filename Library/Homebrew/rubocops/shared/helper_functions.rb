@@ -1,6 +1,8 @@
 # typed: false
 # frozen_string_literal: true
 
+require "rubocop"
+
 module RuboCop
   module Cop
     # Helper functions for cops.
@@ -10,7 +12,7 @@ module RuboCop
       include RangeHelp
 
       # Checks for regex match of pattern in the node and
-      # sets the appropriate instance variables to report the match
+      # sets the appropriate instance variables to report the match.
       def regex_match_group(node, pattern)
         string_repr = string_content(node).encode("UTF-8", invalid: :replace)
         match_object = string_repr.match(pattern)
@@ -26,32 +28,32 @@ module RuboCop
         @length = match_object.to_s.length
         @line_no = line_number(node)
         @source_buf = source_buffer(node)
-        @offense_source_range = source_range(@source_buf, @line_no, @column, @length)
         @offensive_node = node
+        @offensive_source_range = source_range(@source_buf, @line_no, @column, @length)
         match_object
       end
 
-      # Returns the begin position of the node's line in source code
+      # Returns the begin position of the node's line in source code.
       def line_start_column(node)
         node.source_range.source_buffer.line_range(node.loc.line).begin_pos
       end
 
-      # Returns the begin position of the node in source code
+      # Returns the begin position of the node in source code.
       def start_column(node)
         node.source_range.begin_pos
       end
 
-      # Returns the line number of the node
+      # Returns the line number of the node.
       def line_number(node)
         node.loc.line
       end
 
-      # Source buffer is required as an argument to report style violations
+      # Source buffer is required as an argument to report style violations.
       def source_buffer(node)
         node.source_range.source_buffer
       end
 
-      # Returns the string representation if node is of type str(plain) or dstr(interpolated) or const
+      # Returns the string representation if node is of type str(plain) or dstr(interpolated) or const.
       def string_content(node)
         case node.type
         when :str
@@ -75,8 +77,8 @@ module RuboCop
         end
       end
 
-      def problem(msg)
-        add_offense(@offensive_node, location: @offense_source_range, message: msg)
+      def problem(msg, &block)
+        add_offense(@offensive_node, message: msg, &block)
       end
     end
   end

@@ -1,4 +1,4 @@
-# typed: false
+# typed: true
 # frozen_string_literal: true
 
 require "formula"
@@ -7,12 +7,15 @@ require "diagnostic"
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def missing_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
-        `missing` [<options>] [<formula>]
+        `missing` [<options>] [<formula>] [<formula> ...]
 
         Check the given <formula> kegs for missing dependencies. If no <formula> are
         provided, check all kegs. Will exit with a non-zero status if any kegs are found
@@ -21,6 +24,8 @@ module Homebrew
       comma_array "--hide",
                   description: "Act as if none of the specified <hidden> are installed. <hidden> should be "\
                                "a comma-separated list of formulae."
+
+      named_args :formula
     end
   end
 

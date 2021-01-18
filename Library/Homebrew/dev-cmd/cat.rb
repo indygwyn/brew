@@ -4,16 +4,26 @@
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def cat_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
-        `cat` <formula>
+        `cat` <formula>|<cask>
 
-        Display the source of <formula>.
+        Display the source of a <formula> or <cask>.
       EOS
-      named :formula
+
+      switch "--formula", "--formulae",
+             description: "Treat all named arguments as formulae."
+      switch "--cask", "--casks",
+             description: "Treat all named arguments as casks."
+      conflicts "--formula", "--cask"
+
+      named_args [:formula, :cask], number: 1
     end
   end
 
@@ -27,6 +37,7 @@ module Homebrew
     else
       "cat"
     end
-    safe_system pager, args.named.to_formulae_paths.first
+
+    safe_system pager, args.named.to_paths.first
   end
 end

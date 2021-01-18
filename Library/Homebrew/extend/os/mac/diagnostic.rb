@@ -94,14 +94,14 @@ module Homebrew
         return if Homebrew::EnvConfig.developer?
 
         who = +"We"
-        if OS::Mac.prerelease?
-          what = "pre-release version"
+        what = if OS::Mac.prerelease?
+          "pre-release version"
         elsif OS::Mac.outdated_release?
           who << " (and Apple)"
-          what = "old version"
-        else
-          return
+          "old version"
         end
+        return if what.blank?
+
         who.freeze
 
         <<~EOS
@@ -228,7 +228,7 @@ module Homebrew
         <<~EOS
           Your Xcode is configured with an invalid path.
           You should change it to the correct path:
-            sudo xcode-select -switch #{path}
+            sudo xcode-select --switch #{path}
         EOS
       end
 
@@ -411,8 +411,10 @@ module Homebrew
         locator = MacOS.sdk_locator
 
         source = if locator.source == :clt
+          update_instructions = MacOS::CLT.update_instructions
           "CLT"
         else
+          update_instructions = MacOS::Xcode.update_instructions
           "Xcode"
         end
 
@@ -420,6 +422,7 @@ module Homebrew
           Your #{source} does not support macOS #{MacOS.version}.
           It is either outdated or was modified.
           Please update your #{source} or delete it if no updates are available.
+          #{update_instructions}
         EOS
       end
     end

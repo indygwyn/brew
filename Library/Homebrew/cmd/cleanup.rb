@@ -5,13 +5,16 @@ require "cleanup"
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def cleanup_args
     Homebrew::CLI::Parser.new do
       days = Homebrew::EnvConfig::ENVS[:HOMEBREW_CLEANUP_MAX_AGE_DAYS][:default]
       usage_banner <<~EOS
-        `cleanup` [<options>] [<formula>|<cask>]
+        `cleanup` [<options>] [<formula>|<cask>] [<formula>|<cask> ...]
 
         Remove stale lock files and outdated downloads for all formulae and casks,
         and remove old versions of installed formulae. If arguments are specified,
@@ -28,17 +31,26 @@ module Homebrew
                           "If you want to delete those too: `rm -rf \"$(brew --cache)\"`"
       switch "--prune-prefix",
              description: "Only prune the symlinks and directories from the prefix and remove no other files."
+
+      named_args [:formula, :cask]
     end
   end
 
   def cleanup
     args = cleanup_args.parse
 
-    if args.prune.present? && !Integer(args.prune, exception: false) && args.prune != "all"
-      raise UsageError, "--prune= expects an integer or 'all'."
+    days = args.prune.presence&.yield_self do |prune|
+      case prune
+      when /\A\d+\Z/
+        prune.to_i
+      when "all"
+        0
+      else
+        raise UsageError, "--prune= expects an integer or 'all'."
+      end
     end
 
-    cleanup = Cleanup.new(*args.named, dry_run: args.dry_run?, scrub: args.s?, days: args.prune&.to_i)
+    cleanup = Cleanup.new(*args.named, dry_run: args.dry_run?, scrub: args.s?, days: days)
     if args.prune_prefix?
       cleanup.prune_prefix_symlinks_and_directories
       return

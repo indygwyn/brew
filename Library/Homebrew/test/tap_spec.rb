@@ -18,6 +18,8 @@ describe Tap do
 
   before do
     path.mkpath
+    (path/"audit_exceptions").mkpath
+    (path/"style_exceptions").mkpath
   end
 
   def setup_tap_files
@@ -36,6 +38,27 @@ describe Tap do
 
     (path/"tap_migrations.json").write <<~JSON
       { "removed-formula": "homebrew/foo" }
+    JSON
+
+    %w[audit_exceptions style_exceptions].each do |exceptions_directory|
+      (path/"#{exceptions_directory}/formula_list.json").write <<~JSON
+        [ "foo", "bar" ]
+      JSON
+
+      (path/"#{exceptions_directory}/formula_hash.json").write <<~JSON
+        { "foo": "foo1", "bar": "bar1" }
+      JSON
+    end
+
+    (path/"pypi_formula_mappings.json").write <<~JSON
+      {
+        "formula1": "foo",
+        "formula2": {
+          "package_name": "foo",
+          "extra_packages": ["bar"],
+          "exclude_packages": ["baz"]
+        }
+      }
     JSON
 
     [
@@ -58,6 +81,14 @@ describe Tap do
       system "git", "remote", "add", "origin", "https://github.com/Homebrew/homebrew-foo"
       system "git", "add", "--all"
       system "git", "commit", "-m", "init"
+    end
+  end
+
+  def setup_completion(link:)
+    HOMEBREW_REPOSITORY.cd do
+      system "git", "init"
+      system "git", "config", "--replace-all", "homebrew.linkcompletions", link.to_s
+      system "git", "config", "--replace-all", "homebrew.completionsmessageshown", "true"
     end
   end
 
@@ -262,6 +293,7 @@ describe Tap do
   specify "#install and #uninstall" do
     setup_tap_files
     setup_git_repo
+    setup_completion link: true
 
     tap = described_class.new("Homebrew", "bar")
 
@@ -285,9 +317,49 @@ describe Tap do
     (HOMEBREW_PREFIX/"share").rmtree if (HOMEBREW_PREFIX/"share").exist?
   end
 
-  specify "#link_completions_and_manpages" do
+  specify "#link_completions_and_manpages when completions are enabled for non-official tap" do
     setup_tap_files
     setup_git_repo
+    setup_completion link: true
+    tap = described_class.new("NotHomebrew", "baz")
+    tap.install clone_target: subject.path/".git"
+    (HOMEBREW_PREFIX/"share/man/man1/brew-tap-cmd.1").delete
+    (HOMEBREW_PREFIX/"etc/bash_completion.d/brew-tap-cmd").delete
+    (HOMEBREW_PREFIX/"share/zsh/site-functions/_brew-tap-cmd").delete
+    (HOMEBREW_PREFIX/"share/fish/vendor_completions.d/brew-tap-cmd.fish").delete
+    tap.link_completions_and_manpages
+    expect(HOMEBREW_PREFIX/"share/man/man1/brew-tap-cmd.1").to be_a_file
+    expect(HOMEBREW_PREFIX/"etc/bash_completion.d/brew-tap-cmd").to be_a_file
+    expect(HOMEBREW_PREFIX/"share/zsh/site-functions/_brew-tap-cmd").to be_a_file
+    expect(HOMEBREW_PREFIX/"share/fish/vendor_completions.d/brew-tap-cmd.fish").to be_a_file
+    tap.uninstall
+  ensure
+    (HOMEBREW_PREFIX/"etc").rmtree if (HOMEBREW_PREFIX/"etc").exist?
+    (HOMEBREW_PREFIX/"share").rmtree if (HOMEBREW_PREFIX/"share").exist?
+  end
+
+  specify "#link_completions_and_manpages when completions are disabled for non-official tap" do
+    setup_tap_files
+    setup_git_repo
+    setup_completion link: false
+    tap = described_class.new("NotHomebrew", "baz")
+    tap.install clone_target: subject.path/".git"
+    (HOMEBREW_PREFIX/"share/man/man1/brew-tap-cmd.1").delete
+    tap.link_completions_and_manpages
+    expect(HOMEBREW_PREFIX/"share/man/man1/brew-tap-cmd.1").to be_a_file
+    expect(HOMEBREW_PREFIX/"etc/bash_completion.d/brew-tap-cmd").not_to be_a_file
+    expect(HOMEBREW_PREFIX/"share/zsh/site-functions/_brew-tap-cmd").not_to be_a_file
+    expect(HOMEBREW_PREFIX/"share/fish/vendor_completions.d/brew-tap-cmd.fish").not_to be_a_file
+    tap.uninstall
+  ensure
+    (HOMEBREW_PREFIX/"etc").rmtree if (HOMEBREW_PREFIX/"etc").exist?
+    (HOMEBREW_PREFIX/"share").rmtree if (HOMEBREW_PREFIX/"share").exist?
+  end
+
+  specify "#link_completions_and_manpages when completions are enabled for official tap" do
+    setup_tap_files
+    setup_git_repo
+    setup_completion link: false
     tap = described_class.new("Homebrew", "baz")
     tap.install clone_target: subject.path/".git"
     (HOMEBREW_PREFIX/"share/man/man1/brew-tap-cmd.1").delete
@@ -320,6 +392,66 @@ describe Tap do
       expect(described_class.each).to be_an_instance_of(Enumerator)
     end
   end
+
+  describe "Formula Lists" do
+    describe "#formula_renames" do
+      it "returns the formula_renames hash" do
+        setup_tap_files
+
+        expected_result = { "oldname" => "foo" }
+        expect(subject.formula_renames).to eq expected_result
+      end
+    end
+
+    describe "#tap_migrations" do
+      it "returns the tap_migrations hash" do
+        setup_tap_files
+
+        expected_result = { "removed-formula" => "homebrew/foo" }
+        expect(subject.tap_migrations).to eq expected_result
+      end
+    end
+
+    describe "#audit_exceptions" do
+      it "returns the audit_exceptions hash" do
+        setup_tap_files
+
+        expected_result = {
+          formula_list: ["foo", "bar"],
+          formula_hash: { "foo" => "foo1", "bar" => "bar1" },
+        }
+        expect(subject.audit_exceptions).to eq expected_result
+      end
+    end
+
+    describe "#style_exceptions" do
+      it "returns the style_exceptions hash" do
+        setup_tap_files
+
+        expected_result = {
+          formula_list: ["foo", "bar"],
+          formula_hash: { "foo" => "foo1", "bar" => "bar1" },
+        }
+        expect(subject.style_exceptions).to eq expected_result
+      end
+    end
+
+    describe "#pypi_formula_mappings" do
+      it "returns the pypi_formula_mappings hash" do
+        setup_tap_files
+
+        expected_result = {
+          "formula1" => "foo",
+          "formula2" => {
+            "package_name"     => "foo",
+            "extra_packages"   => ["bar"],
+            "exclude_packages" => ["baz"],
+          },
+        }
+        expect(subject.pypi_formula_mappings).to eq expected_result
+      end
+    end
+  end
 end
 
 describe CoreTap do
@@ -341,12 +473,25 @@ describe CoreTap do
   end
 
   specify "files" do
+    path = Tap::TAP_DIRECTORY/"homebrew/homebrew-core"
     formula_file = subject.formula_dir/"foo.rb"
     formula_file.write <<~RUBY
       class Foo < Formula
         url "https://brew.sh/foo-1.0.tar.gz"
       end
     RUBY
+
+    formula_list_file_json = '{ "foo": "foo1", "bar": "bar1" }'
+    formula_list_file_contents = { "foo" => "foo1", "bar" => "bar1" }
+    %w[
+      formula_renames.json
+      tap_migrations.json
+      audit_exceptions/formula_list.json
+      style_exceptions/formula_hash.json
+      pypi_formula_mappings.json
+    ].each do |file|
+      (path/file).write formula_list_file_json
+    end
 
     alias_file = subject.alias_dir/"bar"
     alias_file.parent.mkpath
@@ -358,5 +503,11 @@ describe CoreTap do
     expect(subject.aliases).to eq(["bar"])
     expect(subject.alias_table).to eq("bar" => "foo")
     expect(subject.alias_reverse_table).to eq("foo" => ["bar"])
+
+    expect(subject.formula_renames).to eq formula_list_file_contents
+    expect(subject.tap_migrations).to eq formula_list_file_contents
+    expect(subject.audit_exceptions).to eq({ formula_list: formula_list_file_contents })
+    expect(subject.style_exceptions).to eq({ formula_hash: formula_list_file_contents })
+    expect(subject.pypi_formula_mappings).to eq formula_list_file_contents
   end
 end

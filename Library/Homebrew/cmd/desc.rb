@@ -7,14 +7,17 @@ require "description_cache_store"
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
   extend Search
 
+  sig { returns(CLI::Parser) }
   def desc_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
-        `desc` [<options>] (<text>|`/`<text>`/`|<formula>)
+        `desc` [<options>] <text>|`/`<text>`/`|<formula> [<text>|`/`<text>`/`|<formula> ...]
 
         Display <formula>'s name and one-line description.
         Formula descriptions are cached; the cache is created on the
@@ -31,7 +34,8 @@ module Homebrew
                           "it is interpreted as a regular expression."
 
       conflicts "--search", "--name", "--description"
-      min_named 1
+
+      named_args :formula, min: 1
     end
   end
 

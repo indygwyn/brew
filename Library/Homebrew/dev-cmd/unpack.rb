@@ -6,12 +6,15 @@ require "formula"
 require "cli/parser"
 
 module Homebrew
+  extend T::Sig
+
   module_function
 
+  sig { returns(CLI::Parser) }
   def unpack_args
     Homebrew::CLI::Parser.new do
       usage_banner <<~EOS
-        `unpack` [<options>] <formula>
+        `unpack` [<options>] <formula> [<formula ...>]
 
         Unpack the source files for <formula> into subdirectories of the current
         working directory.
@@ -27,7 +30,8 @@ module Homebrew
              description: "Overwrite the destination directory if it already exists."
 
       conflicts "--git", "--patch"
-      min_named :formula
+
+      named_args :formula, min: 1
     end
   end
 

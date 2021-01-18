@@ -24,8 +24,10 @@ if ENV["HOMEBREW_TESTS_COVERAGE"]
 end
 
 require "rspec/its"
+require "rspec/github"
 require "rspec/wait"
 require "rspec/retry"
+require "rspec/sorbet"
 require "rubocop"
 require "rubocop/rspec/support"
 require "find"
@@ -37,7 +39,6 @@ $LOAD_PATH.push(File.expand_path("#{ENV["HOMEBREW_LIBRARY"]}/Homebrew/test/suppo
 require_relative "../global"
 
 require "test/support/no_seed_progress_formatter"
-require "test/support/github_formatter"
 require "test/support/helper/cask"
 require "test/support/helper/fixtures"
 require "test/support/helper/formula"
@@ -58,6 +59,10 @@ TEST_DIRECTORIES = [
   HOMEBREW_TEMP,
 ].freeze
 
+# Make `instance_double` and `class_double`
+# work when type-checking is active.
+RSpec::Sorbet.allow_doubles!
+
 RSpec.configure do |config|
   config.order = :random
 
@@ -75,10 +80,15 @@ RSpec.configure do |config|
   if ENV["CI"]
     config.verbose_retry = true
     config.display_try_failure_messages = true
-    config.default_retry_count = 2
+
+    config.around(:each, :integration_test) do |example|
+      example.metadata[:timeout] ||= 120
+      example.run
+    end
 
     config.around(:each, :needs_network) do |example|
-      example.run_with_retry retry: 3, retry_wait: 3
+      example.metadata[:timeout] ||= 120
+      example.run_with_retry retry: 5, retry_wait: 5
     end
   end
 
@@ -155,54 +165,52 @@ RSpec.configure do |config|
 
   config.around do |example|
     def find_files
+      return [] unless File.exist?(TEST_TMPDIR)
+
       Find.find(TEST_TMPDIR)
           .reject { |f| File.basename(f) == ".DS_Store" }
+          .reject { |f| TEST_DIRECTORIES.include?(Pathname(f)) }
           .map { |f| f.sub(TEST_TMPDIR, "") }
     end
 
+    Homebrew.raise_deprecation_exceptions = true
+
+    Formulary.clear_cache
+    Tap.clear_cache
+    DependencyCollector.clear_cache
+    Formula.clear_cache
+    Keg.clear_cache
+    Tab.clear_cache
+    FormulaInstaller.clear_attempted
+    FormulaInstaller.clear_installed
+
+    TEST_DIRECTORIES.each(&:mkpath)
+
+    @__homebrew_failed = Homebrew.failed?
+
+    @__files_before_test = find_files
+
+    @__env = ENV.to_hash # dup doesn't work on ENV
+
+    @__stdout = $stdout.clone
+    @__stderr = $stderr.clone
+
     begin
-      Homebrew.raise_deprecation_exceptions = true
-
-      Formulary.clear_cache
-      Tap.clear_cache
-      DependencyCollector.clear_cache
-      Formula.clear_cache
-      Keg.clear_cache
-      Tab.clear_cache
-      FormulaInstaller.clear_attempted
-      FormulaInstaller.clear_installed
-
-      TEST_DIRECTORIES.each(&:mkpath)
-
-      @__homebrew_failed = Homebrew.failed?
-
-      @__files_before_test = find_files
-
-      @__env = ENV.to_hash # dup doesn't work on ENV
-
-      @__stdout = $stdout.clone
-      @__stderr = $stderr.clone
-
       if (example.metadata.keys & [:focus, :byebug]).empty? && !ENV.key?("VERBOSE_TESTS")
         $stdout.reopen(File::NULL)
         $stderr.reopen(File::NULL)
       end
 
       begin
-        timeout = example.metadata.fetch(:timeout, 120)
-        inner_timeout = nil
+        timeout = example.metadata.fetch(:timeout, 60)
         Timeout.timeout(timeout) do
           example.run
-        rescue Timeout::Error => e
-          inner_timeout = e
         end
-      rescue Timeout::Error
-        raise "Example exceeded maximum runtime of #{timeout} seconds."
+      rescue Timeout::Error => e
+        example.example.set_exception(e)
       end
-
-      raise inner_timeout if inner_timeout
     rescue SystemExit => e
-      raise "Unexpected exit with status #{e.status}."
+      example.example.set_exception(e)
     ensure
       ENV.replace(@__env)
 
@@ -219,7 +227,7 @@ RSpec.configure do |config|
       Tab.clear_cache
 
       FileUtils.rm_rf [
-        TEST_DIRECTORIES.map(&:children),
+        *TEST_DIRECTORIES,
         *Keg::MUST_EXIST_SUBDIRECTORIES,
         HOMEBREW_LINKED_KEGS,
         HOMEBREW_PINNED_KEGS,
@@ -237,6 +245,10 @@ RSpec.configure do |config|
         CoreTap.instance.path/".git",
         CoreTap.instance.alias_dir,
         CoreTap.instance.path/"formula_renames.json",
+        CoreTap.instance.path/"tap_migrations.json",
+        CoreTap.instance.path/"audit_exceptions",
+        CoreTap.instance.path/"style_exceptions",
+        CoreTap.instance.path/"pypi_formula_mappings.json",
         *Pathname.glob("#{HOMEBREW_CELLAR}/*/"),
       ]
 

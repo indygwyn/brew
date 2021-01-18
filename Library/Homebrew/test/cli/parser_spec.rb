@@ -62,7 +62,7 @@ describe Homebrew::CLI::Parser do
       it "passes through invalid options" do
         args = parser.parse(["-v", "named-arg", "--not-a-valid-option"], ignore_invalid_options: true)
         expect(args.remaining).to eq ["named-arg", "--not-a-valid-option"]
-        expect(args.named_args).to be_empty
+        expect(args.named).to be_empty
       end
     end
 
@@ -246,9 +246,45 @@ describe Homebrew::CLI::Parser do
       end
     }
 
-    it "raises exception upon Homebrew.args mutation" do
+    it "raises exception when arguments were already parsed" do
       parser.parse(["--switch-a"])
       expect { parser.parse(["--switch-b"]) }.to raise_error(RuntimeError, /Arguments were already parsed!/)
+    end
+  end
+
+  describe "test inferrability of args" do
+    subject(:parser) {
+      described_class.new do
+        switch "--switch-a"
+        switch "--switch-b"
+        switch "--foo-switch"
+        flag "--flag-foo="
+        comma_array "--comma-array-foo"
+      end
+    }
+
+    it "parses a valid switch that uses `_` instead of `-`" do
+      args = parser.parse(["--switch_a"])
+      expect(args).to be_switch_a
+    end
+
+    it "parses a valid flag that uses `_` instead of `-`" do
+      args = parser.parse(["--flag_foo=foo.txt"])
+      expect(args.flag_foo).to eq "foo.txt"
+    end
+
+    it "parses a valid comma_array that uses `_` instead of `-`" do
+      args = parser.parse(["--comma_array_foo=foo.txt,bar.txt"])
+      expect(args.comma_array_foo).to eq %w[foo.txt bar.txt]
+    end
+
+    it "raises an error when option is ambiguous" do
+      expect { parser.parse(["--switch"]) }.to raise_error(RuntimeError, /ambiguous option: --switch/)
+    end
+
+    it "inferrs the option from an abbreviated name" do
+      args = parser.parse(["--foo"])
+      expect(args).to be_foo_switch
     end
   end
 
@@ -279,6 +315,137 @@ describe Homebrew::CLI::Parser do
     it "#named returns an empty array when there are no named arguments" do
       args = parser.parse([])
       expect(args.named).to be_empty
+    end
+  end
+
+  describe "named_args" do
+    let(:parser_none) {
+      described_class.new do
+        named_args :none
+      end
+    }
+    let(:parser_number) {
+      described_class.new do
+        named_args number: 1
+      end
+    }
+
+    it "doesn't allow :none passed with a number" do
+      expect do
+        described_class.new do
+          named_args :none, number: 1
+        end
+      end.to raise_error(ArgumentError, /Do not specify both `number`, `min` or `max` with `named_args :none`/)
+    end
+
+    it "doesn't allow number and min" do
+      expect do
+        described_class.new do
+          named_args number: 1, min: 1
+        end
+      end.to raise_error(ArgumentError, /Do not specify both `number` and `min` or `max`/)
+    end
+
+    it "doesn't accept fewer than the passed number of arguments" do
+      expect { parser_number.parse([]) }.to raise_error(Homebrew::CLI::MinNamedArgumentsError)
+    end
+
+    it "doesn't accept more than the passed number of arguments" do
+      expect { parser_number.parse(["foo", "bar"]) }.to raise_error(Homebrew::CLI::MaxNamedArgumentsError)
+    end
+
+    it "accepts the passed number of arguments" do
+      expect { parser_number.parse(["foo"]) }.not_to raise_error
+    end
+
+    it "doesn't accept any arguments with :none" do
+      expect { parser_none.parse(["foo"]) }
+        .to raise_error(Homebrew::CLI::MaxNamedArgumentsError, /This command does not take named arguments/)
+    end
+
+    it "accepts no arguments with :none" do
+      expect { parser_none.parse([]) }.not_to raise_error
+    end
+
+    it "displays the correct error message with an array of strings" do
+      parser = described_class.new do
+        named_args %w[on off], min: 1
+      end
+      expect { parser.parse([]) }.to raise_error(Homebrew::CLI::MinNamedArgumentsError)
+    end
+
+    it "displays the correct error message with an array of symbols" do
+      parser = described_class.new do
+        named_args [:formula, :cask], min: 1
+      end
+      expect { parser.parse([]) }.to raise_error(UsageError, /this command requires a formula or cask argument/)
+    end
+  end
+
+  describe "named" do
+    subject(:parser) {
+      described_class.new do
+        named 1
+      end
+    }
+
+    it "allows the specified number of arguments" do
+      expect { parser.parse(["foo"]) }.not_to raise_error
+    end
+
+    it "doesn't allow less than the specified number of arguments" do
+      expect { parser.parse([]) }.to raise_error(Homebrew::CLI::MinNamedArgumentsError)
+    end
+
+    it "treats a symbol as a single argument of the specified type" do
+      formula_parser = described_class.new do
+        named :formula
+      end
+      expect { formula_parser.parse([]) }.to raise_error(UsageError, /this command requires a formula argument/)
+    end
+
+    it "doesn't allow more than the specified number of arguments" do
+      expect { parser.parse(["foo", "bar"]) }.to raise_error(Homebrew::CLI::MaxNamedArgumentsError)
+    end
+  end
+
+  describe "min_named" do
+    subject(:parser) {
+      described_class.new do
+        min_named 1
+      end
+    }
+
+    it "doesn't allow less than the minimum number of arguments" do
+      expect { parser.parse([]) }.to raise_error(Homebrew::CLI::MinNamedArgumentsError)
+    end
+
+    it "allows the minimum number of arguments" do
+      expect { parser.parse(["foo"]) }.not_to raise_error
+    end
+
+    it "allows more than the specified number of arguments" do
+      expect { parser.parse(["foo", "bar"]) }.not_to raise_error
+    end
+  end
+
+  describe "max_named" do
+    subject(:parser) {
+      described_class.new do
+        max_named 1
+      end
+    }
+
+    it "doesn't allow more than the minimum number of arguments" do
+      expect { parser.parse(["foo", "bar"]) }.to raise_error(Homebrew::CLI::MaxNamedArgumentsError)
+    end
+
+    it "allows the minimum number of arguments" do
+      expect { parser.parse(["foo"]) }.not_to raise_error
+    end
+
+    it "allows less than the specified number of arguments" do
+      expect { parser.parse([]) }.not_to raise_error
     end
   end
 end
